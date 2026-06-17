@@ -25,6 +25,7 @@ interface Group {
   id: string;
   name: string;
   unit: string;
+  creatorId?: string;
   interestConfig?: {
     rate: number;
     type: "none" | "simple" | "compound";

@@ -140,7 +140,7 @@ export default function GroupSettingsPage() {
   };
 
   const renderPreview = () => {
-    if (interestConfig.type === "none" || interestConfig.frequency === "none" || interestConfig.rate <= 0) {
+    if (interestConfig.type === "none" || interestConfig.frequency === "none" || Number(interestConfig.rate) <= 0) {
       return <p className="text-sm text-gray-500">当前未开启计息，或参数未配置完整。</p>;
     }
 
