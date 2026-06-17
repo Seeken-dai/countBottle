@@ -3,6 +3,8 @@ import { adminDb } from "@/lib/firebase-admin";
 import { verifyUser } from "@/lib/auth-server";
 import { FieldValue } from "firebase-admin/firestore";
 
+export const runtime = "nodejs";
+
 export async function GET() {
   const user = await verifyUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

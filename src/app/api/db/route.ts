@@ -3,6 +3,8 @@ import { adminAuth, adminDb } from "@/lib/firebase-admin";
 import { verifyUser } from "@/lib/auth-server";
 import { FieldValue } from "firebase-admin/firestore";
 
+export const runtime = "nodejs";
+
 function serializeFirestore(value: any): any {
   if (!value) return value;
   if (typeof value.toDate === "function") return value.toDate().toISOString();

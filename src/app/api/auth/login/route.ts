@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { adminAuth } from "@/lib/firebase-admin";
 
+export const runtime = "nodejs";
+
 const FIREBASE_API_KEY = "AIzaSyA8XsBNIYhQ7MM3eF7y9uSdWvNkzi5D-B4";
 
 export async function POST(request: Request) {
