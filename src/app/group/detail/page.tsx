@@ -3,8 +3,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { auth, db } from "@/lib/firebase";
-import { collection, query, where, onSnapshot, doc, getDoc, getDocs, addDoc, updateDoc, serverTimestamp, increment, deleteDoc, runTransaction } from "firebase/firestore";
+import { addDocProxy, deleteDocProxy, getDocProxy, proxyRequest, queryProxy, updateDocProxy } from "@/lib/useFirestore";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Modal } from "@/components/ui/modal";
 import Link from "next/link";
@@ -60,6 +59,15 @@ interface Record {
 
 type SortOption = "time" | "name" | "balance";
 
+function getTimeValue(value: any) {
+  if (!value) return 0;
+  if (typeof value === "string") return new Date(value).getTime();
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.seconds === "number") return value.seconds * 1000;
+  if (typeof value._seconds === "number") return value._seconds * 1000;
+  return 0;
+}
+
 function GroupDetailsContent() {
   const searchParams = useSearchParams();
   const groupId = searchParams.get("id") as string;
@@ -103,161 +111,85 @@ function GroupDetailsContent() {
     if (!groupData.interestConfig || groupData.interestConfig.type === "none" || groupData.interestConfig.frequency === "none" || !groupData.interestConfig.lastCalculatedAt) {
       return;
     }
-
-    const lastDate = groupData.interestConfig.lastCalculatedAt.toDate();
-    const now = new Date();
-    const diffMs = now.getTime() - lastDate.getTime();
-    const days = diffMs / (1000 * 60 * 60 * 24);
-
-    let periodsPassed = 0;
-    const freq = groupData.interestConfig.frequency;
-    if (freq === 'daily') periodsPassed = Math.floor(days);
-    else if (freq === 'weekly') periodsPassed = Math.floor(days / 7);
-    else if (freq === 'monthly') periodsPassed = Math.floor(days / 30);
-    else if (freq === 'yearly') periodsPassed = Math.floor(days / 365);
-
-    if (periodsPassed >= 1) {
-      const groupRef = doc(db, "Groups", groupId);
-      try {
-        await runTransaction(db, async (transaction) => {
-          const freshGroup = await transaction.get(groupRef);
-          if (!freshGroup.exists()) return;
-          const freshConfig = freshGroup.data().interestConfig;
-          
-          // Re-check inside transaction to prevent race conditions
-          const freshLastDate = freshConfig.lastCalculatedAt.toDate();
-          const freshDiffMs = now.getTime() - freshLastDate.getTime();
-          const freshDays = freshDiffMs / (1000 * 60 * 60 * 24);
-          let freshPeriods = 0;
-          if (freq === 'daily') freshPeriods = Math.floor(freshDays);
-          else if (freq === 'weekly') freshPeriods = Math.floor(freshDays / 7);
-          else if (freq === 'monthly') freshPeriods = Math.floor(freshDays / 30);
-          else if (freq === 'yearly') freshPeriods = Math.floor(freshDays / 365);
-
-          if (freshPeriods >= 1) {
-            // Calculate true timestamp that should have been used
-            const msPerPeriod = {
-              daily: 86400000,
-              weekly: 604800000,
-              monthly: 2592000000, // Approx 30 days
-              yearly: 31536000000
-            }[freq] as number;
-
-            const newLastCalculatedTime = new Date(freshLastDate.getTime() + freshPeriods * msPerPeriod);
-
-            // Fetch all members
-            const membersQuery = query(collection(db, "Members"), where("groupId", "==", groupId));
-            const membersSnap = await getDocs(membersQuery);
-            
-            const rate = freshConfig.rate / 100;
-            const isCompound = freshConfig.type === "compound";
-
-            membersSnap.forEach((memberDoc) => {
-              const mData = memberDoc.data();
-              if (mData.balance > 0) {
-                let newBalance = mData.balance;
-                let totalInterest = 0;
-
-                for(let i = 0; i < freshPeriods; i++) {
-                  const interestForPeriod = isCompound ? newBalance * rate : mData.balance * rate;
-                  totalInterest += interestForPeriod;
-                  newBalance += interestForPeriod;
-                }
-
-                totalInterest = parseFloat(totalInterest.toFixed(2));
-                newBalance = parseFloat(newBalance.toFixed(2));
-
-                if (totalInterest > 0) {
-                  let newTotalAdded = mData.totalAdded ?? mData.balance;
-                  newTotalAdded += totalInterest;
-                  transaction.update(memberDoc.ref, { balance: newBalance, totalAdded: newTotalAdded });
-                  const recordRef = doc(collection(db, "Records"));
-                  transaction.set(recordRef, {
-                    groupId,
-                    memberId: memberDoc.id,
-                    operatorId: "SYSTEM",
-                    type: "INTEREST",
-                    amount: totalInterest,
-                    createdAt: serverTimestamp()
-                  });
-                }
-              }
-            });
-
-            // Update Group lastCalculatedAt
-            transaction.update(groupRef, {
-              "interestConfig.lastCalculatedAt": newLastCalculatedTime
-            });
-          }
-        });
-        console.log("Lazy evaluation of interest completed successfully.");
-      } catch (err) {
-        console.error("Lazy evaluation failed (likely race condition handled):", err);
-      }
+    try {
+      await proxyRequest({ action: "transaction_interest", docId: groupId });
+    } catch (err) {
+      console.error("Lazy evaluation failed:", err);
     }
   };
 
   useEffect(() => {
-    const fetchGroup = async () => {
-      const docRef = doc(db, "Groups", groupId);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        const groupData = { id: docSnap.id, ...docSnap.data() } as Group;
-        setGroup(groupData);
-        // Trigger lazy evaluation
-        triggerLazyInterest(groupData);
+    let cancelled = false;
+
+    const fetchGroupData = async () => {
+      const groupData = await getDocProxy("Groups", groupId) as Group | null;
+      if (cancelled) return;
+      if (groupData) {
+        const normalizedGroup = { ...groupData, unit: groupData.unit || (groupData as any).currency || "瓶" };
+        setGroup(normalizedGroup);
+        triggerLazyInterest(normalizedGroup);
       } else {
         alert("群组不存在");
         router.push("/dashboard");
       }
-    };
-    fetchGroup();
+    }
 
-    const q = query(collection(db, "Members"), where("groupId", "==", groupId));
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const memberDocs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Member));
+    const fetchMembers = async () => {
+      const memberDocs = await queryProxy("Members", [["groupId", "==", groupId]]) as Member[];
       const resolvedMembers = await Promise.all(memberDocs.map(async (m) => {
         if (m.userId) {
-          const userSnap = await getDoc(doc(db, "Users", m.userId));
-          if (userSnap.exists()) {
-            const uData = userSnap.data();
+          const uData = await getDocProxy("Users", m.userId);
+          if (uData) {
             return { ...m, displayName: uData.displayName, photoURL: uData.photoURL };
           }
         }
         return m;
       }));
+      if (cancelled) return;
       setMembers(resolvedMembers);
-    });
+    };
 
-    const qRecs = query(collection(db, "Records"), where("groupId", "==", groupId));
-    const unsubscribeRecs = onSnapshot(qRecs, (snapshot) => {
-      const recs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Record));
+    const fetchRecords = async () => {
+      const recs = await queryProxy("Records", [["groupId", "==", groupId]]) as Record[];
+      if (cancelled) return;
       setGroupRecords(recs);
-    });
+    };
 
-    return () => { unsubscribe(); unsubscribeRecs(); };
+    const refresh = () => {
+      fetchGroupData();
+      fetchMembers();
+      fetchRecords();
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, [groupId, router]);
 
   useEffect(() => {
     if (!selectedMemberId) {
       return;
     }
-    const q = query(collection(db, "Records"), where("memberId", "==", selectedMemberId));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const recs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Record));
-      recs.sort((a, b) => {
-        const timeA = a.createdAt?.toMillis() || 0;
-        const timeB = b.createdAt?.toMillis() || 0;
-        return timeB - timeA;
-      });
-      setMemberRecords(recs);
-    });
-    return () => unsubscribe();
+    let cancelled = false;
+    const fetchMemberRecords = async () => {
+      const recs = await queryProxy("Records", [["memberId", "==", selectedMemberId]]) as Record[];
+      recs.sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
+      if (!cancelled) setMemberRecords(recs);
+    };
+    fetchMemberRecords();
+    const interval = window.setInterval(fetchMemberRecords, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, [selectedMemberId]);
 
   const currentUserMember = members.find(m => m.userId === user?.uid);
-  const isCreator = group?.creatorId === user?.uid;
-  const isSubAdmin = currentUserMember?.role === "SUB_ADMIN" || currentUserMember?.role === "ADMIN";
+  const isCreator = group?.creatorId === user?.uid || (group as any)?.createdBy === user?.uid;
+  const isSubAdmin = currentUserMember?.role === "SUB_ADMIN" || currentUserMember?.role === "ADMIN" || currentUserMember?.role === "OWNER";
   const isAdmin = isCreator || isSubAdmin;
   const hasClaimed = !!currentUserMember;
 
@@ -267,7 +199,7 @@ function GroupDetailsContent() {
     let total = 0;
     members.forEach(member => {
       const memberRecs = groupRecords.filter(r => r.memberId === member.id);
-      memberRecs.sort((a, b) => (a.createdAt?.toMillis() || 0) - (b.createdAt?.toMillis() || 0));
+      memberRecs.sort((a, b) => getTimeValue(a.createdAt) - getTimeValue(b.createdAt));
       
       let runningBalance = 0;
       let memberTotalAdded = 0;
@@ -302,8 +234,8 @@ function GroupDetailsContent() {
     return [...members].sort((a, b) => {
       if (sortOption === "name") return a.remarkName.localeCompare(b.remarkName, 'zh-CN');
       if (sortOption === "balance") return b.balance - a.balance;
-      const timeA = a.createdAt?.toMillis() || 0;
-      const timeB = b.createdAt?.toMillis() || 0;
+      const timeA = getTimeValue(a.createdAt);
+      const timeB = getTimeValue(b.createdAt);
       return timeA - timeB;
     });
   }, [members, sortOption]);
@@ -313,8 +245,8 @@ function GroupDetailsContent() {
     if (!isAdmin || !newMemberName.trim()) return;
     setIsActionLoading(true);
     try {
-      await addDoc(collection(db, "Members"), {
-        groupId, userId: null, role: "MEMBER", remarkName: newMemberName.trim(), balance: 0, totalAdded: 0, createdAt: serverTimestamp()
+      await addDocProxy("Members", {
+        groupId, userId: null, role: "MEMBER", remarkName: newMemberName.trim(), balance: 0, totalAdded: 0
       });
       setIsAddMemberModalOpen(false);
       setNewMemberName("");
@@ -326,7 +258,7 @@ function GroupDetailsContent() {
     if (!user) return;
     if (hasClaimed) { alert("你已经在该群组中拥有身份了，无法重复认领。"); return; }
     if (!confirm(`确认要认领身份「${memberName}」吗？`)) return;
-    try { await updateDoc(doc(db, "Members", memberId), { userId: user.uid }); } 
+    try { await updateDocProxy("Members", memberId, { userId: user.uid }); } 
     catch (err) { alert("认领失败"); }
   };
 
@@ -360,10 +292,7 @@ function GroupDetailsContent() {
     }, 1000);
 
     try {
-      await updateDoc(doc(db, "Members", memberId), { balance: increment(1), totalAdded: increment(1) });
-      await addDoc(collection(db, "Records"), {
-        groupId, memberId, operatorId: user.uid, type: "ADD", amount: 1, createdAt: serverTimestamp()
-      });
+      await proxyRequest({ action: "quickAddRecord", data: { groupId, memberId } });
     } catch (err) { alert("操作失败"); }
   };
 
@@ -374,35 +303,16 @@ function GroupDetailsContent() {
     if (isNaN(amount) || amount < 0) { alert("请输入有效的非负整数"); return; }
 
     setIsActionLoading(true);
-    const memberRef = doc(db, "Members", selectedMember.id);
     
     try {
-      await runTransaction(db, async (transaction) => {
-        const memberDoc = await transaction.get(memberRef);
-        if (!memberDoc.exists()) throw new Error("成员不存在");
-        
-        const currentBalance = memberDoc.data().balance;
-        let newBalance = currentBalance;
-        let newTotalAdded = memberDoc.data().totalAdded ?? currentBalance;
-
-        if (recordActionType === "ADD") {
-          newBalance += amount;
-          newTotalAdded += amount;
+      await proxyRequest({
+        action: "submitRecord",
+        data: {
+          groupId,
+          memberId: selectedMember.id,
+          recordActionType,
+          amount
         }
-        else if (recordActionType === "DEDUCT") {
-          newBalance -= amount;
-          if (newBalance < 0) throw new Error("余额不能为负数");
-        } 
-        else if (recordActionType === "SET") {
-          if (amount > currentBalance) newTotalAdded += (amount - currentBalance);
-          newBalance = amount;
-        }
-
-        transaction.update(memberRef, { balance: newBalance, totalAdded: newTotalAdded });
-        const recordRef = doc(collection(db, "Records"));
-        transaction.set(recordRef, {
-          groupId, memberId: selectedMember.id, operatorId: user.uid, type: recordActionType, amount: recordActionType === "SET" ? newBalance : amount, createdAt: serverTimestamp()
-        });
       });
       setRecordAmount("");
       setSelectedMemberId(null);
@@ -415,7 +325,7 @@ function GroupDetailsContent() {
     if (!isAdmin || !selectedMember || !editRemarkName.trim()) return;
     setIsActionLoading(true);
     try {
-      await updateDoc(doc(db, "Members", selectedMember.id), { remarkName: editRemarkName.trim() });
+      await updateDocProxy("Members", selectedMember.id, { remarkName: editRemarkName.trim() });
       setEditRemarkName("");
     } catch (err) { alert("修改失败"); } 
     finally { setIsActionLoading(false); }
@@ -424,7 +334,7 @@ function GroupDetailsContent() {
   const handleUnbind = async () => {
     if (!isCreator || !selectedMember || !selectedMember.userId) return;
     if (!confirm("确认要强制解绑该成员吗？解绑后卡片将变为空白卡片供重新认领，但流水会保留。")) return;
-    try { await updateDoc(doc(db, "Members", selectedMember.id), { userId: null }); } 
+    try { await updateDocProxy("Members", selectedMember.id, { userId: null }); } 
     catch (err) { alert("解绑失败"); }
   };
 
@@ -432,7 +342,7 @@ function GroupDetailsContent() {
     if (!isCreator || !selectedMember) return;
     if (!confirm("⚠️ 危险操作：确认要删除该成员吗？与其相关的流水可能也会丢失或成为孤儿数据。")) return;
     try {
-      await deleteDoc(doc(db, "Members", selectedMember.id));
+      await deleteDocProxy("Members", selectedMember.id);
       setSelectedMemberId(null);
     } catch (err) { alert("删除失败"); }
   };
@@ -667,7 +577,7 @@ function GroupDetailsContent() {
                           {record.type === "SET" && "强制调平为"}
                           {record.type === "INTEREST" && "自动计息"}
                         </span>
-                        <span className="text-xs text-gray-500 mt-1">{record.createdAt ? new Date(record.createdAt.toMillis()).toLocaleString() : "刚刚"}</span>
+                        <span className="text-xs text-gray-500 mt-1">{record.createdAt ? new Date(getTimeValue(record.createdAt)).toLocaleString() : "刚刚"}</span>
                       </div>
                       <span className={`font-black ${record.type === 'DEDUCT' ? 'text-orange-500' : 'text-primary'}`}>
                         {record.type === 'DEDUCT' ? '-' : record.type === 'ADD' || record.type === 'INTEREST' ? '+' : ''}{record.amount}

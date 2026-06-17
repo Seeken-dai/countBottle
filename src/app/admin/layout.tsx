@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { getDocProxy } from "@/lib/useFirestore";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -21,8 +20,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
     const checkAdmin = async () => {
       try {
-        const snap = await getDoc(doc(db, "SuperAdmins", user.uid));
-        if (snap.exists()) {
+        const admin = await getDocProxy("SuperAdmins", user.uid);
+        if (admin) {
           setIsSuperAdmin(true);
         } else {
           setIsSuperAdmin(false);

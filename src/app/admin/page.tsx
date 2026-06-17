@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { db } from "@/lib/firebase";
-import { collection, getDocs, updateDoc, doc, writeBatch, query, where } from "firebase/firestore";
+import { proxyRequest, queryProxy, updateDocProxy } from "@/lib/useFirestore";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Modal } from "@/components/ui/modal";
 
@@ -19,7 +18,9 @@ interface GroupData {
   id: string;
   name: string;
   unit: string;
+  currency?: string;
   creatorId: string;
+  createdBy?: string;
   createdAt: any;
 }
 
@@ -56,17 +57,19 @@ export default function AdminPage() {
     setIsLoading(true);
     try {
       // Fetch Users
-      const usersSnap = await getDocs(collection(db, "Users"));
-      const usersData = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() } as UserData));
+      const usersData = await queryProxy("Users") as UserData[];
       // Sort users by createdAt desc
       usersData.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
       setUsers(usersData);
 
       // Fetch Groups
-      const groupsSnap = await getDocs(collection(db, "Groups"));
-      const groupsData = groupsSnap.docs.map(d => ({ id: d.id, ...d.data() } as GroupData));
+      const groupsData = (await queryProxy("Groups") as GroupData[]).map(group => ({
+        ...group,
+        creatorId: group.creatorId || group.createdBy || "",
+        unit: group.unit || group.currency || "瓶"
+      }));
       // Sort groups by createdAt desc
-      groupsData.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+      groupsData.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
       setGroups(groupsData);
       
     } catch (err) {
@@ -82,9 +85,7 @@ export default function AdminPage() {
     setIsGroupModalOpen(true);
     setIsLoadingMembers(true);
     try {
-      const memQuery = query(collection(db, "Members"), where("groupId", "==", group.id));
-      const memSnap = await getDocs(memQuery);
-      const membersData = memSnap.docs.map(d => ({ id: d.id, ...d.data() } as MemberData));
+      const membersData = await queryProxy("Members", [["groupId", "==", group.id]]) as MemberData[];
       
       // Merge user display names
       const mergedMembers = membersData.map(m => {
@@ -118,17 +119,11 @@ export default function AdminPage() {
 
     setIsActionLoading(true);
     try {
-      const batch = writeBatch(db);
-      
-      // Update group creatorId
-      batch.update(doc(db, "Groups", selectedGroup.id), { creatorId: member.userId });
-      
-      // Update new creator's role to ADMIN
-      if (member.role !== "ADMIN") {
-        batch.update(doc(db, "Members", member.id), { role: "ADMIN" });
-      }
-
-      await batch.commit();
+      await proxyRequest({
+        action: "transferCreator",
+        docId: selectedGroup.id,
+        data: { memberId: member.id, newCreatorId: member.userId }
+      });
 
       // Update local state
       setSelectedGroup(prev => prev ? { ...prev, creatorId: member.userId! } : null);
@@ -156,7 +151,7 @@ export default function AdminPage() {
 
     setIsActionLoading(true);
     try {
-      await updateDoc(doc(db, "Members", member.id), { role: newRole });
+      await updateDocProxy("Members", member.id, { role: newRole });
       setGroupMembers(prev => prev.map(m => m.id === member.id ? { ...m, role: newRole } : m));
     } catch (err) {
       console.error("Error toggling role:", err);
@@ -236,7 +231,7 @@ export default function AdminPage() {
                       <td className="px-6 py-4 text-gray-500 font-mono text-xs">{group.id}</td>
                       <td className="px-6 py-4 text-gray-500">{group.unit}</td>
                       <td className="px-6 py-4 text-gray-500">
-                        {group.createdAt ? new Date(group.createdAt.toMillis()).toLocaleString() : "-"}
+                        {group.createdAt ? new Date(group.createdAt).toLocaleString() : "-"}
                       </td>
                       <td className="px-6 py-4 text-right">
                         <button

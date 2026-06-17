@@ -3,8 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { auth, db } from "@/lib/firebase";
-import { doc, getDoc, updateDoc, deleteDoc, collection, query, where, getDocs, writeBatch } from "firebase/firestore";
+import { getDocProxy, proxyRequest, queryProxy, updateDocProxy } from "@/lib/useFirestore";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Suspense } from "react";
 
@@ -40,11 +39,10 @@ function GroupSettingsContent() {
     const fetchAuthAndData = async () => {
       if (!user) return;
       
-      const groupRef = doc(db, "Groups", groupId);
-      const groupSnap = await getDoc(groupRef);
-      if (groupSnap.exists()) {
-        const data = groupSnap.data();
-        if (data.creatorId !== user.uid) {
+      const data = await getDocProxy("Groups", groupId);
+      if (data) {
+        const creatorId = data.creatorId || data.createdBy;
+        if (creatorId !== user.uid) {
           alert("你没有权限访问设置页 (仅创建者可用)");
           router.push(`/group/detail?id=${groupId}`);
           return;
@@ -58,9 +56,7 @@ function GroupSettingsContent() {
         }
 
         // Fetch all members
-        const membersQuery = query(collection(db, "Members"), where("groupId", "==", groupId));
-        const membersSnap = await getDocs(membersQuery);
-        const fetchedMembers = membersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const fetchedMembers = await queryProxy("Members", [["groupId", "==", groupId]]);
         setMembers(fetchedMembers);
       } else {
         router.push("/dashboard");
@@ -76,7 +72,7 @@ function GroupSettingsContent() {
     if (!groupName.trim() || !groupUnit.trim()) return;
     setIsSaving(true);
     try {
-      await updateDoc(doc(db, "Groups", groupId), {
+      await updateDocProxy("Groups", groupId, {
         name: groupName.trim(),
         unit: groupUnit.trim(),
         announcement: announcementText.trim()
@@ -90,13 +86,13 @@ function GroupSettingsContent() {
     e.preventDefault();
     setIsSaving(true);
     try {
-      await updateDoc(doc(db, "Groups", groupId), {
+      await updateDocProxy("Groups", groupId, {
         interestConfig: {
           ...interestConfig,
           rate: Number(interestConfig.rate) || 0,
           // Initialize lastCalculatedAt if activating interest for the first time
           lastCalculatedAt: interestConfig.type !== "none" && !interestConfig.lastCalculatedAt 
-            ? new Date() 
+            ? { __serverTimestamp: true }
             : interestConfig.lastCalculatedAt || null
         }
       });
@@ -117,22 +113,7 @@ function GroupSettingsContent() {
 
     setIsSaving(true);
     try {
-      const batch = writeBatch(db);
-      
-      // Delete Members
-      const membersQuery = query(collection(db, "Members"), where("groupId", "==", groupId));
-      const membersSnap = await getDocs(membersQuery);
-      membersSnap.forEach(d => batch.delete(d.ref));
-
-      // Delete Records
-      const recordsQuery = query(collection(db, "Records"), where("groupId", "==", groupId));
-      const recordsSnap = await getDocs(recordsQuery);
-      recordsSnap.forEach(d => batch.delete(d.ref));
-
-      // Delete Group
-      batch.delete(doc(db, "Groups", groupId));
-
-      await batch.commit();
+      await proxyRequest({ action: "batchDeleteGroup", docId: groupId });
       router.push("/dashboard");
     } catch (err) {
       alert("删除失败");
@@ -252,7 +233,7 @@ function GroupSettingsContent() {
                   <button 
                     onClick={async () => {
                       const newRole = m.role === "SUB_ADMIN" ? "MEMBER" : "SUB_ADMIN";
-                      await updateDoc(doc(db, "Members", m.id), { role: newRole });
+                      await updateDocProxy("Members", m.id, { role: newRole });
                       setMembers(members.map(x => x.id === m.id ? { ...x, role: newRole } : x));
                     }}
                     className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${m.role === "SUB_ADMIN" ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 hover:bg-purple-200" : "bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"}`}

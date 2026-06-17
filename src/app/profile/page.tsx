@@ -3,11 +3,11 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { auth, db, storage } from "@/lib/firebase";
+import { auth, storage } from "@/lib/firebase";
 import { updateProfile } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { proxyRequest } from "@/lib/useFirestore";
 
 export default function ProfilePage() {
   const { user } = useAuth();
@@ -67,18 +67,20 @@ export default function ProfilePage() {
     setIsLoading(true);
     
     try {
-      await updateProfile(user, {
-        displayName: displayName.trim(),
-        photoURL: photoURL.trim()
-      });
+      if (auth.currentUser) {
+        await updateProfile(auth.currentUser, {
+          displayName: displayName.trim(),
+          photoURL: photoURL.trim()
+        });
+      }
 
-      await setDoc(doc(db, "Users", user.uid), {
-        uid: user.uid,
-        email: user.email,
-        displayName: displayName.trim(),
-        photoURL: photoURL.trim(),
-        updatedAt: new Date()
-      }, { merge: true });
+      await proxyRequest({
+        action: "updateProfile",
+        data: {
+          displayName: displayName.trim(),
+          photoURL: photoURL.trim()
+        }
+      });
 
       alert("个人资料保存成功！");
       router.push("/dashboard");

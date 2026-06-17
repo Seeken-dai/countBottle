@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { auth, db } from "@/lib/firebase";
-import { doc, getDoc, collection, query, where, getDocs, addDoc, serverTimestamp } from "firebase/firestore";
+import { addDocProxy, getDocProxy, queryProxy } from "@/lib/useFirestore";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Suspense } from "react";
 
@@ -29,34 +28,31 @@ function InviteContent() {
       try {
         setIsJoining(true);
         // 1. Fetch group
-        const groupRef = doc(db, "Groups", id);
-        const groupSnap = await getDoc(groupRef);
+        const group = await getDocProxy("Groups", id);
         
-        if (!groupSnap.exists()) {
+        if (!group) {
           setError("群组不存在或已被解散");
           return;
         }
-        setGroupName(groupSnap.data().name);
+        setGroupName(group.name);
 
         // 2. Check if already a member
-        const q = query(collection(db, "Members"), where("groupId", "==", id), where("userId", "==", user.uid));
-        const memberSnaps = await getDocs(q);
+        const members = await queryProxy("Members", [["groupId", "==", id], ["userId", "==", user.uid]]);
         
-        if (!memberSnaps.empty) {
+        if (members.length > 0) {
           // Already in group, redirect directly
           router.replace(`/group/detail?id=${id}`);
           return;
         }
 
         // 3. Auto-join: Create member document
-        await addDoc(collection(db, "Members"), {
+        await addDocProxy("Members", {
           groupId: id,
           userId: user.uid,
           role: "MEMBER",
           remarkName: user.displayName || user.email?.split("@")[0] || "新成员",
           balance: 0,
-          totalAdded: 0,
-          createdAt: serverTimestamp()
+          totalAdded: 0
         });
 
         // Redirect to group page after successful join

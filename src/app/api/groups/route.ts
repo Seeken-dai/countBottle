@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { verifyUser } from "@/lib/auth-server";
+import { FieldValue } from "firebase-admin/firestore";
 
 export async function GET() {
   const user = await verifyUser();
@@ -18,9 +19,12 @@ export async function GET() {
       const memberData = docSnap.data();
       const groupSnap = await adminDb.collection("Groups").doc(memberData.groupId).get();
       if (groupSnap.exists) {
+        const groupData = groupSnap.data() || {};
         groupsData.push({
           id: groupSnap.id,
-          ...groupSnap.data(),
+          ...groupData,
+          creatorId: groupData.creatorId || groupData.createdBy,
+          unit: groupData.unit || groupData.currency || "瓶",
           myBalance: memberData.balance,
           role: memberData.role
         });
@@ -40,13 +44,16 @@ export async function POST(request: Request) {
   try {
     const { name, currency, description } = await request.json();
     const groupRef = adminDb.collection("Groups").doc();
+    const unit = currency || "瓶";
     const newGroup = {
       id: groupRef.id,
       name,
-      currency,
+      unit,
+      currency: unit,
       description: description || "",
+      creatorId: user.uid,
       createdBy: user.uid,
-      createdAt: new Date().toISOString(),
+      createdAt: FieldValue.serverTimestamp(),
       members: [user.uid]
     };
     await groupRef.set(newGroup);
@@ -56,14 +63,24 @@ export async function POST(request: Request) {
     await memberRef.set({
       groupId: groupRef.id,
       userId: user.uid,
-      role: "OWNER",
+      role: "ADMIN",
       remarkName: user.name || user.email?.split("@")[0] || "群主",
       balance: 0,
       totalAdded: 0,
-      createdAt: new Date().toISOString()
+      createdAt: FieldValue.serverTimestamp()
     });
 
-    return NextResponse.json({ group: newGroup });
+    return NextResponse.json({
+      group: {
+        id: groupRef.id,
+        name,
+        unit,
+        currency: unit,
+        description: description || "",
+        creatorId: user.uid,
+        createdBy: user.uid
+      }
+    });
   } catch (error) {
     return NextResponse.json({ error: "Internal Error" }, { status: 500 });
   }
