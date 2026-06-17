@@ -2,13 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { auth, db } from "@/lib/firebase";
-import { signOut } from "firebase/auth";
+import { auth } from "@/lib/firebase";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useRouter } from "next/navigation";
 import { Modal } from "@/components/ui/modal";
-import { collection, query, where, onSnapshot, addDoc, serverTimestamp, doc, getDoc } from "firebase/firestore";
 import Link from "next/link";
+import useSWR from 'swr';
 
 interface Group {
   id: string;
@@ -24,8 +23,10 @@ interface Member {
   balance: number;
 }
 
+const fetcher = (url: string) => fetch(url).then(res => res.json());
+
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, mutateUser } = useAuth();
   const router = useRouter();
   
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -36,60 +37,14 @@ export default function DashboardPage() {
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
   const [joinGroupId, setJoinGroupId] = useState("");
 
-  const [groups, setGroups] = useState<(Group & { myBalance: number, role: string })[]>([]);
-  const [isLoadingGroups, setIsLoadingGroups] = useState(true);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-
-  useEffect(() => {
-    if (!user) return;
-
-    // Listen to Members collection where userId == user.uid
-    const q = query(collection(db, "Members"), where("userId", "==", user.uid));
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      try {
-        // Check SuperAdmin status
-        getDoc(doc(db, "SuperAdmins", user.uid)).then(snap => {
-          setIsSuperAdmin(snap.exists());
-        }).catch(err => console.error("Error checking superadmin:", err));
-        const memberDocs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Member));
-        
-        // For each member doc, fetch the Group details
-        const groupPromises = memberDocs.map(async (member) => {
-          const groupRef = doc(db, "Groups", member.groupId);
-          const groupSnap = await getDoc(groupRef);
-          if (groupSnap.exists()) {
-            return {
-              id: groupSnap.id,
-              ...groupSnap.data() as Omit<Group, 'id'>,
-              myBalance: member.balance,
-              role: member.role
-            };
-          }
-          return null;
-        });
-
-        const resolvedGroups = (await Promise.all(groupPromises)).filter(Boolean) as (Group & { myBalance: number, role: string })[];
-        
-        // Sort by created time descending
-        resolvedGroups.sort((a, b) => {
-          const timeA = a.createdAt?.toMillis() || 0;
-          const timeB = b.createdAt?.toMillis() || 0;
-          return timeB - timeA;
-        });
-
-        setGroups(resolvedGroups);
-      } catch (err) {
-        console.error("Error fetching groups:", err);
-      } finally {
-        setIsLoadingGroups(false);
-      }
-    });
-
-    return () => unsubscribe();
-  }, [user]);
+  const { data, error, mutate } = useSWR(user ? '/api/groups' : null, fetcher, { refreshInterval: 5000 });
+  const groups = data?.groups || [];
+  const isSuperAdmin = data?.isSuperAdmin || false;
+  const isLoadingGroups = !data && !error && !!user;
 
   const handleLogout = async () => {
-    await signOut(auth);
+    await fetch('/api/auth/logout', { method: 'POST' });
+    mutateUser();
     router.push("/login");
   };
 
@@ -99,39 +54,24 @@ export default function DashboardPage() {
 
     setIsCreating(true);
     try {
-      // 1. Create Group
-      const groupRef = await addDoc(collection(db, "Groups"), {
-        name: newGroupName.trim(),
-        unit: newGroupUnit.trim() || "个",
-        creatorId: user.uid,
-        interestConfig: {
-          rate: 0,
-          type: "none",
-          frequency: "none"
-        },
-        createdAt: serverTimestamp()
+      const res = await fetch('/api/groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newGroupName.trim(),
+          currency: newGroupUnit.trim() || "个",
+        }),
       });
 
-      // 2. Create Member card for creator
-      await addDoc(collection(db, "Members"), {
-        groupId: groupRef.id,
-        userId: user.uid,
-        role: "ADMIN",
-        remarkName: user.displayName || "我",
-        balance: 0,
-        totalAdded: 0,
-        createdAt: serverTimestamp()
-      });
+      if (!res.ok) throw new Error("Failed to create group");
 
       setIsCreateModalOpen(false);
       setNewGroupName("");
       setNewGroupUnit("瓶");
-      
-      // Navigate to the group details page (to be implemented)
-      // router.push(`/group/${groupRef.id}`);
+      mutate(); // Refresh the SWR data
     } catch (err) {
       console.error("Error creating group:", err);
-      alert("创建群组失败，请重试");
+      alert("创建失败，请重试");
     } finally {
       setIsCreating(false);
     }

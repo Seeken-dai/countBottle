@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 // import { getAnalytics } from "firebase/analytics";
 
@@ -15,10 +15,15 @@ const firebaseConfig = {
   measurementId: "G-5488F7W8PR"
 };
 
+
 // Initialize Firebase (Singleton pattern to prevent re-initialization in Next.js development)
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
-const db = getFirestore(app);
+const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+  host: typeof window !== 'undefined' ? window.location.host : undefined,
+  ssl: typeof window !== 'undefined' ? window.location.protocol === 'https:' : true,
+});
 const storage = getStorage(app);
 
 // Analytics is only available in browser environment

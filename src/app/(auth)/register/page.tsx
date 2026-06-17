@@ -3,9 +3,7 @@
 import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase";
+import { useAuth } from "@/lib/auth-context";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 function RegisterContent() {
@@ -17,6 +15,8 @@ function RegisterContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectUrl = searchParams.get("redirect") || "/dashboard";
+
+  const { mutateUser } = useAuth();
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,24 +30,15 @@ function RegisterContent() {
     }
 
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-
-      // Update profile
-      if (displayName) {
-        await updateProfile(user, { displayName });
-      }
-
-      // Initialize user in Firestore
-      await setDoc(doc(db, "Users", user.uid), {
-        uid: user.uid,
-        email: user.email,
-        displayName: displayName || email.split("@")[0],
-        photoURL: user.photoURL || null,
-        themePreference: "system",
-        createdAt: new Date().toISOString()
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, displayName }),
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
 
+      mutateUser();
       router.push(redirectUrl);
     } catch (err: any) {
       setError(err.message || "注册失败，该邮箱可能已被使用");

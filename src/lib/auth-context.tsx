@@ -1,18 +1,25 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { User, onAuthStateChanged } from "firebase/auth";
-import { auth } from "@/lib/firebase";
 import { useRouter, usePathname } from "next/navigation";
+
+interface User {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+}
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  mutateUser: () => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
+  mutateUser: () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -23,25 +30,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      setLoading(false);
-
-      // Protect routes logic
-      const isAuthRoute = pathname?.startsWith('/login') || pathname?.startsWith('/register') || pathname?.startsWith('/forgot-password');
-      if (user && isAuthRoute) {
-        router.replace('/dashboard'); // redirect to dashboard if logged in
-      } else if (!user && !isAuthRoute && pathname !== '/') {
-        router.replace('/login');
+  const fetchUser = async () => {
+    try {
+      const res = await fetch("/api/auth/user");
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.user);
+      } else {
+        setUser(null);
       }
-    });
+    } catch {
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    return () => unsubscribe();
-  }, [pathname, router]);
+  useEffect(() => {
+    fetchUser();
+  }, []);
+
+  useEffect(() => {
+    if (loading) return;
+
+    const isAuthRoute = pathname?.startsWith('/login') || pathname?.startsWith('/register') || pathname?.startsWith('/forgot-password');
+    if (user && isAuthRoute) {
+      router.replace('/dashboard');
+    } else if (!user && !isAuthRoute && pathname !== '/') {
+      router.replace('/login');
+    }
+  }, [user, loading, pathname, router]);
 
   return (
-    <AuthContext.Provider value={{ user, loading }}>
+    <AuthContext.Provider value={{ user, loading, mutateUser: fetchUser }}>
       {loading ? (
         <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
           <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
