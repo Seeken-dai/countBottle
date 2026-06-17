@@ -17,6 +17,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "小聚记账 (countBottle-web)",
   description: "专为熟人聚会、桌游娱乐等线下场景打造的 Web 端记录工具",
+  other: {
+    "countbottle-version": "1.2.1",
+  },
 };
 
 export default function RootLayout({
@@ -28,6 +31,7 @@ export default function RootLayout({
     <html
       lang="zh-CN"
       suppressHydrationWarning
+      data-countbottle-version="1.2.1"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
