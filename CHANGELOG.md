@@ -4,6 +4,10 @@
 
 **🌍 核心架构升级与超级后台**
 
+### 🐛 修复与优化 (Bug Fixes & Tweaks)
+
+* 修复服务端 Session 校验依赖额外 Firebase Auth 用户查询权限，导致登录后立刻回退登录页的问题。
+
 ### 🚀 核心特性 (Features)
 
 * **全局超级管理后台 (Super Admin)**：
@@ -60,4 +64,3 @@
 * 引入全面 Glassmorphism (毛玻璃) 和深色悬浮卡片美学。
 * 基于 TailwindCSS v4 构建全局 CSS 变量体系。
 * 引入 Headless UI 配合过渡动画解决 React 渲染销毁时的闪烁/错位问题。
-

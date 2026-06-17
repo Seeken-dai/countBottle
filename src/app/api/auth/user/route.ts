@@ -13,16 +13,15 @@ export async function GET() {
       return NextResponse.json({ authenticated: false }, { status: 401 });
     }
 
-    const decodedClaims = await adminAuth.verifySessionCookie(sessionCookie, true);
-    const userRecord = await adminAuth.getUser(decodedClaims.uid);
+    const decodedClaims = await adminAuth.verifySessionCookie(sessionCookie);
 
     return NextResponse.json({
       authenticated: true,
       user: {
-        uid: userRecord.uid,
-        email: userRecord.email,
-        displayName: userRecord.displayName,
-        photoURL: userRecord.photoURL,
+        uid: decodedClaims.uid,
+        email: decodedClaims.email || null,
+        displayName: decodedClaims.name || decodedClaims.email?.split("@")[0] || null,
+        photoURL: decodedClaims.picture || null,
       }
     });
   } catch (error) {

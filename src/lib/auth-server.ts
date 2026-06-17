@@ -7,7 +7,7 @@ export async function verifyUser() {
   if (!sessionCookie) return null;
 
   try {
-    const decodedClaims = await adminAuth.verifySessionCookie(sessionCookie, true);
+    const decodedClaims = await adminAuth.verifySessionCookie(sessionCookie);
     return decodedClaims;
   } catch (error) {
     return null;
