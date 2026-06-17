@@ -21,3 +21,4 @@ jobs:
           projectId: countbottle-web
         env:
           FIREBASE_CLI_EXPERIMENTS: webframeworks
+          NPM_CONFIG_LEGACY_PEER_DEPS: 'true'
