@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { auth, db } from "@/lib/firebase";
 import { doc, getDoc, collection, query, where, getDocs, addDoc, serverTimestamp } from "firebase/firestore";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Suspense } from "react";
 
-export default function InvitePage() {
-  const { id } = useParams() as { id: string };
+function InviteContent() {
+  const searchParams = useSearchParams();
+  const id = searchParams.get("id") as string;
   const { user, loading } = useAuth();
   const router = useRouter();
   const [groupName, setGroupName] = useState<string>("");
@@ -19,7 +21,7 @@ export default function InvitePage() {
     if (loading) return;
     if (!user) {
       // Not logged in, redirect to login with return url
-      router.replace(`/login?redirect=/invite/${id}`);
+      router.replace(`/login?redirect=/invite?id=${id}`);
       return;
     }
 
@@ -42,7 +44,7 @@ export default function InvitePage() {
         
         if (!memberSnaps.empty) {
           // Already in group, redirect directly
-          router.replace(`/group/${id}`);
+          router.replace(`/group/detail?id=${id}`);
           return;
         }
 
@@ -58,7 +60,7 @@ export default function InvitePage() {
         });
 
         // Redirect to group page after successful join
-        router.replace(`/group/${id}`);
+        router.replace(`/group/detail?id=${id}`);
       } catch (err: any) {
         console.error("Join error:", err);
         setError("加入群组失败，请重试");
@@ -103,5 +105,13 @@ export default function InvitePage() {
         <p className="text-gray-500 dark:text-gray-400">请稍候，马上带你进入</p>
       </div>
     </div>
+  );
+}
+
+export default function InvitePage() {
+  return (
+    <Suspense fallback={<div className="flex h-screen items-center justify-center">Loading...</div>}>
+      <InviteContent />
+    </Suspense>
   );
 }

@@ -138,13 +138,13 @@ export default function DashboardPage() {
   };
 
   const navigateToGroup = (groupId: string) => {
-    router.push(`/group/${groupId}`);
+    router.push(`/group/detail?id=${groupId}`);
   };
 
   const handleJoinGroup = (e: React.FormEvent) => {
     e.preventDefault();
     if (!joinGroupId.trim()) return;
-    router.push(`/group/${joinGroupId.trim()}`);
+    router.push(`/group/detail?id=${joinGroupId.trim()}`);
   };
 
   if (!user) return null; // Avoid flicker before redirect

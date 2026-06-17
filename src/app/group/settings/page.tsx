@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { auth, db } from "@/lib/firebase";
 import { doc, getDoc, updateDoc, deleteDoc, collection, query, where, getDocs, writeBatch } from "firebase/firestore";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Suspense } from "react";
 
 interface InterestConfig {
   rate: number | string;
@@ -14,9 +15,9 @@ interface InterestConfig {
   lastCalculatedAt?: any;
 }
 
-export default function GroupSettingsPage() {
-  const { id } = useParams();
-  const groupId = id as string;
+function GroupSettingsContent() {
+  const searchParams = useSearchParams();
+  const groupId = searchParams.get("id") as string;
   const { user } = useAuth();
   const router = useRouter();
 
@@ -45,7 +46,7 @@ export default function GroupSettingsPage() {
         const data = groupSnap.data();
         if (data.creatorId !== user.uid) {
           alert("你没有权限访问设置页 (仅创建者可用)");
-          router.push(`/group/${groupId}`);
+          router.push(`/group/detail?id=${groupId}`);
           return;
         }
         setIsAdmin(true);
@@ -186,7 +187,7 @@ export default function GroupSettingsPage() {
       <header className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-md shadow-sm border-b border-gray-200 dark:border-gray-800 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <button onClick={() => router.push(`/group/${groupId}`)} className="p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors">
+            <button onClick={() => router.push(`/group/detail?id=${groupId}`)} className="p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
               </svg>
@@ -326,5 +327,13 @@ export default function GroupSettingsPage() {
         </section>
       </main>
     </div>
+  );
+}
+
+export default function GroupSettingsPage() {
+  return (
+    <Suspense fallback={<div className="flex h-screen items-center justify-center">Loading...</div>}>
+      <GroupSettingsContent />
+    </Suspense>
   );
 }
