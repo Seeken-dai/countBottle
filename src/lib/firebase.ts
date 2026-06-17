@@ -1,5 +1,4 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 // import { getAnalytics } from "firebase/analytics";
 
@@ -17,7 +16,6 @@ const firebaseConfig = {
 
 // Initialize Firebase (Singleton pattern to prevent re-initialization in Next.js development)
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const auth = getAuth(app);
 const storage = getStorage(app);
 
 // Analytics is only available in browser environment
@@ -26,4 +24,4 @@ const storage = getStorage(app);
 //   analytics = getAnalytics(app);
 // }
 
-export { app, auth, storage };
+export { app, storage };

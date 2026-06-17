@@ -3,8 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { auth, storage } from "@/lib/firebase";
-import { updateProfile } from "firebase/auth";
+import { storage } from "@/lib/firebase";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { proxyRequest } from "@/lib/useFirestore";
@@ -67,13 +66,6 @@ export default function ProfilePage() {
     setIsLoading(true);
     
     try {
-      if (auth.currentUser) {
-        await updateProfile(auth.currentUser, {
-          displayName: displayName.trim(),
-          photoURL: photoURL.trim()
-        });
-      }
-
       await proxyRequest({
         action: "updateProfile",
         data: {

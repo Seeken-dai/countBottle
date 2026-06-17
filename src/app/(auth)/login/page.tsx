@@ -3,9 +3,7 @@
 import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { signInWithPopup, GoogleAuthProvider } from "firebase/auth";
 import { useAuth } from "@/lib/auth-context";
-import { auth } from "@/lib/firebase";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 function LoginContent() {
@@ -42,24 +40,7 @@ function LoginContent() {
 
   const handleGoogleLogin = async () => {
     setError("");
-    setIsLoading(true);
-    const provider = new GoogleAuthProvider();
-    try {
-      const result = await signInWithPopup(auth, provider);
-      const idToken = await result.user.getIdToken();
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idToken }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      mutateUser();
-      router.push(redirectUrl);
-    } catch (err: any) {
-      setError(err.message || "Google 登录失败");
-      setIsLoading(false);
-    }
+    setError("Google 登录暂未开放，请先使用邮箱密码登录。");
   };
 
   return (

@@ -8,6 +8,7 @@ export async function POST(request: Request) {
     const { email, password, idToken: providedIdToken } = await request.json();
 
     let idToken = providedIdToken;
+    let authData: any = null;
 
     if (!idToken) {
       // Fetch from Firebase Identity Toolkit REST API
@@ -21,6 +22,7 @@ export async function POST(request: Request) {
       if (!res.ok) {
         return NextResponse.json({ error: data.error.message }, { status: 401 });
       }
+      authData = data;
       idToken = data.idToken;
     }
     
@@ -28,7 +30,7 @@ export async function POST(request: Request) {
     const expiresIn = 60 * 60 * 24 * 5 * 1000;
     const sessionCookie = await adminAuth.createSessionCookie(idToken, { expiresIn });
 
-    const response = NextResponse.json({ success: true, user: data });
+    const response = NextResponse.json({ success: true, user: authData });
     response.cookies.set("session", sessionCookie, {
       maxAge: expiresIn / 1000,
       httpOnly: true,

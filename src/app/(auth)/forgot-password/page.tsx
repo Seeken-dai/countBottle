@@ -2,8 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { sendPasswordResetEmail } from "firebase/auth";
-import { auth } from "@/lib/firebase";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function ForgotPasswordPage() {
@@ -19,7 +17,13 @@ export default function ForgotPasswordPage() {
     setIsLoading(true);
 
     try {
-      await sendPasswordResetEmail(auth, email);
+      const res = await fetch("/api/auth/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
       setMessage("重置密码邮件已发送，请检查您的收件箱");
     } catch (err: any) {
       setError(err.message || "发送失败，请检查邮箱地址是否正确");
