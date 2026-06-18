@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { addDocProxy, deleteDocProxy, getDocProxy, proxyRequest, queryProxy, updateDocProxy } from "@/lib/useFirestore";
+import { getDocProxy, proxyRequest, queryProxy, updateDocProxy } from "@/lib/useFirestore";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Modal } from "@/components/ui/modal";
 import Link from "next/link";
@@ -26,6 +26,7 @@ interface Group {
   name: string;
   unit: string;
   creatorId?: string;
+  requireClaimApproval?: boolean;
   interestConfig?: {
     rate: number;
     type: "none" | "simple" | "compound";
@@ -55,6 +56,14 @@ interface Record {
   amount: number;
   createdAt?: any;
   totalAdded?: number;
+  note?: string;
+}
+
+interface ClaimRequest {
+  id: string;
+  memberId: string;
+  requesterId: string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
 }
 
 type SortOption = "time" | "name" | "balance";
@@ -104,7 +113,9 @@ function GroupDetailsContent() {
   const [groupRecords, setGroupRecords] = useState<Record[]>([]);
   const [recordActionType, setRecordActionType] = useState<"ADD" | "DEDUCT" | "SET">("ADD");
   const [recordAmount, setRecordAmount] = useState<string>("");
+  const [recordNote, setRecordNote] = useState<string>("");
   const [editRemarkName, setEditRemarkName] = useState("");
+  const [pendingClaimMemberIds, setPendingClaimMemberIds] = useState<Set<string>>(new Set());
 
   // LAZY EVALUATION FOR INTEREST
   const triggerLazyInterest = async (groupData: Group) => {
@@ -170,6 +181,39 @@ function GroupDetailsContent() {
   }, [groupId, router]);
 
   useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+
+    const fetchSortPreference = async () => {
+      const userDoc = await getDocProxy("Users", user.uid);
+      const preferredSort = userDoc?.groupMemberSortOption as SortOption | undefined;
+      if (!cancelled && (preferredSort === "time" || preferredSort === "name" || preferredSort === "balance")) {
+        setSortOption(preferredSort);
+      }
+    };
+
+    fetchSortPreference();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || !groupId) return;
+    let cancelled = false;
+
+    const fetchPendingClaims = async () => {
+      const claims = await queryProxy("ClaimRequests", [["groupId", "==", groupId], ["requesterId", "==", user.uid], ["status", "==", "PENDING"]]) as ClaimRequest[];
+      if (!cancelled) setPendingClaimMemberIds(new Set(claims.map(claim => claim.memberId)));
+    };
+
+    fetchPendingClaims();
+    const interval = window.setInterval(fetchPendingClaims, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [groupId, user]);
+
+  useEffect(() => {
     if (!selectedMemberId) {
       return;
     }
@@ -232,7 +276,7 @@ function GroupDetailsContent() {
 
   const sortedMembers = useMemo(() => {
     return [...members].sort((a, b) => {
-      if (sortOption === "name") return a.remarkName.localeCompare(b.remarkName, 'zh-CN');
+      if (sortOption === "name") return a.remarkName.localeCompare(b.remarkName, 'zh-Hans-CN-u-co-pinyin', { sensitivity: "base", numeric: true });
       if (sortOption === "balance") return b.balance - a.balance;
       const timeA = getTimeValue(a.createdAt);
       const timeB = getTimeValue(b.createdAt);
@@ -245,12 +289,27 @@ function GroupDetailsContent() {
     if (!isAdmin || !newMemberName.trim()) return;
     setIsActionLoading(true);
     try {
-      await addDocProxy("Members", {
-        groupId, userId: null, role: "MEMBER", remarkName: newMemberName.trim(), balance: 0, totalAdded: 0
-      });
+      await proxyRequest({ action: "addMember", data: { groupId, remarkName: newMemberName.trim() } });
       setIsAddMemberModalOpen(false);
       setNewMemberName("");
     } catch (err) { alert("添加成员失败"); } finally { setIsActionLoading(false); }
+  };
+
+  const handleSortChange = async (nextSort: SortOption) => {
+    setSortOption(nextSort);
+    if (user) {
+      try {
+        await updateDocProxy("Users", user.uid, { groupMemberSortOption: nextSort });
+      } catch (err) {
+        console.error("Failed to save sort preference:", err);
+      }
+    }
+  };
+
+  const selectRecordActionType = (nextType: "ADD" | "DEDUCT" | "SET") => {
+    setRecordActionType(nextType);
+    setRecordAmount("");
+    setRecordNote("");
   };
 
   const handleClaim = async (memberId: string, memberName: string, e: React.MouseEvent) => {
@@ -258,8 +317,13 @@ function GroupDetailsContent() {
     if (!user) return;
     if (hasClaimed) { alert("你已经在该群组中拥有身份了，无法重复认领。"); return; }
     if (!confirm(`确认要认领身份「${memberName}」吗？`)) return;
-    try { await updateDocProxy("Members", memberId, { userId: user.uid }); } 
-    catch (err) { alert("认领失败"); }
+    try {
+      const result = await proxyRequest({ action: "requestClaim", data: { groupId, memberId } }) as { status?: string };
+      if (result?.status === "PENDING") {
+        setPendingClaimMemberIds(prev => new Set(prev).add(memberId));
+        alert("认领申请已提交，等待管理员审核。");
+      }
+    } catch (err: any) { alert(err.message || "认领失败"); }
   };
 
   const generateImage = async () => {
@@ -311,10 +375,12 @@ function GroupDetailsContent() {
           groupId,
           memberId: selectedMember.id,
           recordActionType,
-          amount
+          amount,
+          note: recordNote.trim()
         }
       });
       setRecordAmount("");
+      setRecordNote("");
       setSelectedMemberId(null);
     } catch (err: any) { alert(err.message || "操作失败"); } 
     finally { setIsActionLoading(false); }
@@ -325,7 +391,7 @@ function GroupDetailsContent() {
     if (!isAdmin || !selectedMember || !editRemarkName.trim()) return;
     setIsActionLoading(true);
     try {
-      await updateDocProxy("Members", selectedMember.id, { remarkName: editRemarkName.trim() });
+      await proxyRequest({ action: "updateMemberName", data: { groupId, memberId: selectedMember.id, remarkName: editRemarkName.trim() } });
       setEditRemarkName("");
     } catch (err) { alert("修改失败"); } 
     finally { setIsActionLoading(false); }
@@ -334,7 +400,7 @@ function GroupDetailsContent() {
   const handleUnbind = async () => {
     if (!isCreator || !selectedMember || !selectedMember.userId) return;
     if (!confirm("确认要强制解绑该成员吗？解绑后卡片将变为空白卡片供重新认领，但流水会保留。")) return;
-    try { await updateDocProxy("Members", selectedMember.id, { userId: null }); } 
+    try { await proxyRequest({ action: "unbindMember", data: { groupId, memberId: selectedMember.id } }); } 
     catch (err) { alert("解绑失败"); }
   };
 
@@ -342,7 +408,7 @@ function GroupDetailsContent() {
     if (!isCreator || !selectedMember) return;
     if (!confirm("⚠️ 危险操作：确认要删除该成员吗？与其相关的流水可能也会丢失或成为孤儿数据。")) return;
     try {
-      await deleteDocProxy("Members", selectedMember.id);
+      await proxyRequest({ action: "deleteMember", data: { groupId, memberId: selectedMember.id } });
       setSelectedMemberId(null);
     } catch (err) { alert("删除失败"); }
   };
@@ -360,7 +426,7 @@ function GroupDetailsContent() {
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">群组详情</h1>
           </div>
           <div className="flex items-center gap-3">
-            {isCreator && (
+            {isAdmin && (
               <Link href={`/group/settings?id=${groupId}`} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors" aria-label="Settings">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
               </Link>
@@ -451,7 +517,7 @@ function GroupDetailsContent() {
         <div className="flex items-center justify-between mb-4 px-1">
           <div className="flex items-center gap-4">
             <h2 className="text-xl sm:text-2xl font-extrabold text-gray-900 dark:text-white tracking-tight">群组成员</h2>
-            <select value={sortOption} onChange={(e) => setSortOption(e.target.value as SortOption)} className="bg-transparent border-none text-sm font-medium text-gray-500 dark:text-gray-400 focus:ring-0 outline-none cursor-pointer p-0">
+            <select value={sortOption} onChange={(e) => handleSortChange(e.target.value as SortOption)} className="bg-transparent border-none text-sm font-medium text-gray-500 dark:text-gray-400 focus:ring-0 outline-none cursor-pointer p-0">
               <option value="time">按加入时间</option>
               <option value="name">按名称</option>
               <option value="balance">按数量</option>
@@ -508,11 +574,15 @@ function GroupDetailsContent() {
                     </div>
                     
                     <div className="w-12 sm:w-16 flex justify-end shrink-0 relative">
-                      {(isAdmin || isMe) && (
+                      {isAdmin && (
                         <button onClick={(e) => handleQuickAdd(member.id, e)} className="relative z-10 w-10 h-8 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl bg-primary text-white font-black text-base sm:text-lg hover:bg-primary/90 hover:-translate-y-1 hover:shadow-lg hover:shadow-primary/30 transition-all active:scale-95 flex items-center justify-center">+1</button>
                       )}
                       {isUnclaimed && !hasClaimed && (
-                        <button onClick={(e) => handleClaim(member.id, member.remarkName, e)} className="px-3 h-8 sm:px-4 sm:h-12 rounded-lg sm:rounded-xl bg-gray-900 text-white dark:bg-white dark:text-gray-900 text-xs sm:text-sm font-bold hover:shadow-lg transition-all active:scale-95">认领</button>
+                        pendingClaimMemberIds.has(member.id) ? (
+                          <span className="px-2 h-8 sm:px-3 sm:h-12 rounded-lg sm:rounded-xl bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300 text-[10px] sm:text-xs font-bold flex items-center justify-center">待审核</span>
+                        ) : (
+                          <button onClick={(e) => handleClaim(member.id, member.remarkName, e)} className="px-3 h-8 sm:px-4 sm:h-12 rounded-lg sm:rounded-xl bg-gray-900 text-white dark:bg-white dark:text-gray-900 text-xs sm:text-sm font-bold hover:shadow-lg transition-all active:scale-95">认领</button>
+                        )
                       )}
                       {floaters.filter(f => f.memberId === member.id).map(f => (
                         <div key={f.id} className="absolute -top-4 right-1 text-primary dark:text-primary font-black text-2xl animate-float-up pointer-events-none z-0 drop-shadow-sm">+1</div>
@@ -553,14 +623,15 @@ function GroupDetailsContent() {
             {(isAdmin || selectedMember.userId === user?.uid) && (
               <form onSubmit={handleRecordSubmit} className="min-w-0 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-4 rounded-2xl shadow-sm space-y-4">
                 <div className="grid grid-cols-3 gap-2">
-                  <button type="button" onClick={() => setRecordActionType("ADD")} className={`min-w-0 px-2 py-2 text-xs sm:text-sm leading-tight font-bold rounded-lg transition-colors ${recordActionType === "ADD" ? "bg-primary text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>记一笔 (+)</button>
-                  {isAdmin && <button type="button" onClick={() => setRecordActionType("DEDUCT")} className={`min-w-0 px-2 py-2 text-xs sm:text-sm leading-tight font-bold rounded-lg transition-colors ${recordActionType === "DEDUCT" ? "bg-orange-500 text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>核销 (-)</button>}
-                  {isAdmin && <button type="button" onClick={() => setRecordActionType("SET")} className={`min-w-0 px-2 py-2 text-xs sm:text-sm leading-tight font-bold rounded-lg transition-colors ${recordActionType === "SET" ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>强制调平 (=)</button>}
+                  <button type="button" onClick={() => selectRecordActionType("ADD")} className={`min-w-0 px-2 py-2 text-xs sm:text-sm leading-tight font-bold rounded-lg transition-colors ${recordActionType === "ADD" ? "bg-primary text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>记一笔 (+)</button>
+                  {isAdmin && <button type="button" onClick={() => selectRecordActionType("DEDUCT")} className={`min-w-0 px-2 py-2 text-xs sm:text-sm leading-tight font-bold rounded-lg transition-colors ${recordActionType === "DEDUCT" ? "bg-orange-500 text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>核销 (-)</button>}
+                  {isAdmin && <button type="button" onClick={() => selectRecordActionType("SET")} className={`min-w-0 px-2 py-2 text-xs sm:text-sm leading-tight font-bold rounded-lg transition-colors ${recordActionType === "SET" ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>强制调平 (=)</button>}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-3">
-                  <input type="number" required min={0} value={recordAmount} onChange={(e) => setRecordAmount(e.target.value)} placeholder="输入数量" className="w-full min-w-0 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-2 focus:ring-primary" />
+                  <input type="number" required min={0} value={recordAmount} onChange={(e) => setRecordAmount(e.target.value)} placeholder="输入数量" className="w-full min-w-0 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-2 focus:ring-primary text-base" />
                   <button type="submit" disabled={isActionLoading || !recordAmount} className="w-full sm:w-auto min-h-11 px-6 rounded-xl font-bold text-white bg-primary disabled:opacity-50">提交</button>
                 </div>
+                <textarea value={recordNote} onChange={(e) => setRecordNote(e.target.value)} maxLength={200} rows={2} placeholder="备注（可选）" className="w-full min-w-0 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-2 focus:ring-primary text-base resize-none" />
               </form>
             )}
 
@@ -578,6 +649,7 @@ function GroupDetailsContent() {
                           {record.type === "INTEREST" && "自动计息"}
                         </span>
                         <span className="text-xs text-gray-500 mt-1">{record.createdAt ? new Date(getTimeValue(record.createdAt)).toLocaleString() : "刚刚"}</span>
+                        {record.note && <span className="text-xs text-gray-500 mt-1 break-words">备注：{record.note}</span>}
                       </div>
                       <span className={`font-black ${record.type === 'DEDUCT' ? 'text-orange-500' : 'text-primary'}`}>
                         {record.type === 'DEDUCT' ? '-' : record.type === 'ADD' || record.type === 'INTEREST' ? '+' : ''}{record.amount}
@@ -595,10 +667,10 @@ function GroupDetailsContent() {
                 
                 <div className="mb-4">
                   <form onSubmit={handleEditRemarkName} className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-3">
-                    <input type="text" value={editRemarkName} onChange={e => setEditRemarkName(e.target.value)} className="w-full min-w-0 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-1 focus:ring-primary text-sm" placeholder="修改备注名" />
+                    <input type="text" value={editRemarkName} onChange={e => setEditRemarkName(e.target.value)} className="w-full min-w-0 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-1 focus:ring-primary text-base sm:text-sm" placeholder="修改备注名" />
                     <button type="submit" disabled={isActionLoading || !editRemarkName} className="w-full sm:w-auto min-h-10 px-4 text-sm font-bold bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded-lg whitespace-nowrap">保存</button>
                   </form>
-                  <p className="text-[11px] text-gray-400 mt-1 ml-1">修改该卡片的对外展示名称</p>
+                  <p className="text-[11px] text-gray-400 mt-1 ml-1">修改该成员的昵称</p>
                 </div>
               </div>
             )}

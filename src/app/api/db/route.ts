@@ -46,6 +46,35 @@ async function canManageGroup(groupId: string, uid: string) {
   return role === "OWNER" || role === "ADMIN" || role === "SUB_ADMIN";
 }
 
+async function writeAuditLog({
+  groupId,
+  operatorId,
+  type,
+  targetType,
+  targetId,
+  summary,
+  metadata = {}
+}: {
+  groupId: string;
+  operatorId: string;
+  type: string;
+  targetType?: string;
+  targetId?: string;
+  summary: string;
+  metadata?: Record<string, unknown>;
+}) {
+  await adminDb.collection("AuditLogs").doc().set({
+    groupId,
+    operatorId,
+    type,
+    targetType: targetType || null,
+    targetId: targetId || null,
+    summary,
+    metadata,
+    createdAt: FieldValue.serverTimestamp()
+  });
+}
+
 export async function POST(request: Request) {
   const user = await verifyUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -131,6 +160,168 @@ export async function POST(request: Request) {
       batch.update(adminDb.collection("Groups").doc(docId), { creatorId: newCreatorId, updatedAt: FieldValue.serverTimestamp() });
       batch.update(adminDb.collection("Members").doc(memberId), { role: "ADMIN", updatedAt: FieldValue.serverTimestamp() });
       await batch.commit();
+      await writeAuditLog({
+        groupId: docId,
+        operatorId: user.uid,
+        type: "CREATOR_TRANSFER",
+        targetType: "member",
+        targetId: memberId,
+        summary: "超管移交群主",
+        metadata: { newCreatorId }
+      });
+      return NextResponse.json({ success: true });
+    }
+    else if (action === "addMember") {
+      const { groupId, remarkName } = data || {};
+      if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      const trimmedName = typeof remarkName === "string" ? remarkName.trim().slice(0, 20) : "";
+      if (!trimmedName) return NextResponse.json({ error: "Invalid member name" }, { status: 400 });
+
+      const memberRef = adminDb.collection("Members").doc();
+      await memberRef.set({
+        groupId,
+        userId: null,
+        role: "MEMBER",
+        remarkName: trimmedName,
+        balance: 0,
+        totalAdded: 0,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp()
+      });
+      await writeAuditLog({
+        groupId,
+        operatorId: user.uid,
+        type: "MEMBER_ADDED",
+        targetType: "member",
+        targetId: memberRef.id,
+        summary: `新增成员：${trimmedName}`
+      });
+      return NextResponse.json({ success: true, id: memberRef.id });
+    }
+    else if (action === "updateGroupBasic") {
+      const { groupId, name, unit, announcement } = data || {};
+      if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      await adminDb.collection("Groups").doc(groupId).update({
+        name: String(name || "").trim(),
+        unit: String(unit || "").trim(),
+        announcement: String(announcement || "").trim(),
+        updatedAt: FieldValue.serverTimestamp()
+      });
+      await writeAuditLog({
+        groupId,
+        operatorId: user.uid,
+        type: "GROUP_SETTINGS_UPDATED",
+        targetType: "group",
+        targetId: groupId,
+        summary: "更新群组基础设置"
+      });
+      return NextResponse.json({ success: true });
+    }
+    else if (action === "updateGroupClaimApproval") {
+      const { groupId, requireClaimApproval } = data || {};
+      if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      await adminDb.collection("Groups").doc(groupId).update({
+        requireClaimApproval: !!requireClaimApproval,
+        updatedAt: FieldValue.serverTimestamp()
+      });
+      await writeAuditLog({
+        groupId,
+        operatorId: user.uid,
+        type: "CLAIM_APPROVAL_SETTING_UPDATED",
+        targetType: "group",
+        targetId: groupId,
+        summary: !!requireClaimApproval ? "开启认领审核" : "关闭认领审核"
+      });
+      return NextResponse.json({ success: true });
+    }
+    else if (action === "updateGroupInterest") {
+      const { groupId, interestConfig } = data || {};
+      if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      const nextConfig = resolveSentinels({
+        ...interestConfig,
+        rate: Number(interestConfig?.rate) || 0
+      });
+      await adminDb.collection("Groups").doc(groupId).update({
+        interestConfig: nextConfig,
+        updatedAt: FieldValue.serverTimestamp()
+      });
+      await writeAuditLog({
+        groupId,
+        operatorId: user.uid,
+        type: "INTEREST_SETTINGS_UPDATED",
+        targetType: "group",
+        targetId: groupId,
+        summary: "更新计息规则",
+        metadata: { type: interestConfig?.type, frequency: interestConfig?.frequency, rate: Number(interestConfig?.rate) || 0 }
+      });
+      return NextResponse.json({ success: true });
+    }
+    else if (action === "updateMemberRole") {
+      const { groupId, memberId, role } = data || {};
+      if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      if (!["MEMBER", "ADMIN", "SUB_ADMIN"].includes(role)) return NextResponse.json({ error: "Invalid role" }, { status: 400 });
+      await adminDb.collection("Members").doc(memberId).update({
+        role,
+        updatedAt: FieldValue.serverTimestamp()
+      });
+      await writeAuditLog({
+        groupId,
+        operatorId: user.uid,
+        type: "MEMBER_ROLE_UPDATED",
+        targetType: "member",
+        targetId: memberId,
+        summary: `调整成员权限为 ${role}`
+      });
+      return NextResponse.json({ success: true });
+    }
+    else if (action === "updateMemberName") {
+      const { groupId, memberId, remarkName } = data || {};
+      if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      const trimmedName = typeof remarkName === "string" ? remarkName.trim().slice(0, 20) : "";
+      if (!trimmedName) return NextResponse.json({ error: "Invalid member name" }, { status: 400 });
+      await adminDb.collection("Members").doc(memberId).update({
+        remarkName: trimmedName,
+        updatedAt: FieldValue.serverTimestamp()
+      });
+      await writeAuditLog({
+        groupId,
+        operatorId: user.uid,
+        type: "MEMBER_NAME_UPDATED",
+        targetType: "member",
+        targetId: memberId,
+        summary: `修改成员昵称：${trimmedName}`
+      });
+      return NextResponse.json({ success: true });
+    }
+    else if (action === "unbindMember") {
+      const { groupId, memberId } = data || {};
+      if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      await adminDb.collection("Members").doc(memberId).update({
+        userId: null,
+        updatedAt: FieldValue.serverTimestamp()
+      });
+      await writeAuditLog({
+        groupId,
+        operatorId: user.uid,
+        type: "MEMBER_UNBOUND",
+        targetType: "member",
+        targetId: memberId,
+        summary: "强制解绑成员账号"
+      });
+      return NextResponse.json({ success: true });
+    }
+    else if (action === "deleteMember") {
+      const { groupId, memberId } = data || {};
+      if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      await adminDb.collection("Members").doc(memberId).delete();
+      await writeAuditLog({
+        groupId,
+        operatorId: user.uid,
+        type: "MEMBER_DELETED",
+        targetType: "member",
+        targetId: memberId,
+        summary: "删除成员卡片"
+      });
       return NextResponse.json({ success: true });
     }
     else if (action === "quickAddRecord") {
@@ -140,8 +331,7 @@ export async function POST(request: Request) {
       if (!memberSnap.exists) return NextResponse.json({ error: "Member not found" }, { status: 404 });
       const member = memberSnap.data();
       if (member?.groupId !== groupId) return NextResponse.json({ error: "Invalid member group" }, { status: 400 });
-      const canOperate = member?.userId === user.uid || await canManageGroup(groupId, user.uid);
-      if (!canOperate) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
       const recordRef = adminDb.collection("Records").doc();
       await adminDb.runTransaction(async (transaction) => {
@@ -156,13 +346,23 @@ export async function POST(request: Request) {
           operatorId: user.uid,
           type: "ADD",
           amount: 1,
+          note: "",
           createdAt: FieldValue.serverTimestamp()
         });
+      });
+      await writeAuditLog({
+        groupId,
+        operatorId: user.uid,
+        type: "BALANCE_ADD",
+        targetType: "member",
+        targetId: memberId,
+        summary: "快速增加 1",
+        metadata: { amount: 1 }
       });
       return NextResponse.json({ success: true });
     }
     else if (action === "submitRecord") {
-      const { memberId, groupId, recordActionType, amount } = data || {};
+      const { memberId, groupId, recordActionType, amount, note } = data || {};
       const memberRef = adminDb.collection("Members").doc(memberId);
       const memberSnap = await memberRef.get();
       if (!memberSnap.exists) return NextResponse.json({ error: "Member not found" }, { status: 404 });
@@ -207,8 +407,133 @@ export async function POST(request: Request) {
           operatorId: user.uid,
           type: recordActionType,
           amount: recordActionType === "SET" ? newBalance : amount,
+          note: typeof note === "string" ? note.trim().slice(0, 200) : "",
           createdAt: FieldValue.serverTimestamp()
         });
+      });
+      await writeAuditLog({
+        groupId,
+        operatorId: user.uid,
+        type: recordActionType === "ADD" ? "BALANCE_ADD" : recordActionType === "DEDUCT" ? "BALANCE_DEDUCT" : "BALANCE_SET",
+        targetType: "member",
+        targetId: memberId,
+        summary: `调整成员余额：${recordActionType}`,
+        metadata: {
+          amount,
+          note: typeof note === "string" ? note.trim().slice(0, 200) : ""
+        }
+      });
+      return NextResponse.json({ success: true });
+    }
+    else if (action === "requestClaim") {
+      const { groupId, memberId } = data || {};
+      const groupSnap = await adminDb.collection("Groups").doc(groupId).get();
+      if (!groupSnap.exists) return NextResponse.json({ error: "Group not found" }, { status: 404 });
+
+      const memberRef = adminDb.collection("Members").doc(memberId);
+      const memberSnap = await memberRef.get();
+      if (!memberSnap.exists) return NextResponse.json({ error: "Member not found" }, { status: 404 });
+      const member = memberSnap.data();
+      if (member?.groupId !== groupId) return NextResponse.json({ error: "Invalid member group" }, { status: 400 });
+      if (member?.userId) return NextResponse.json({ error: "Member already claimed" }, { status: 409 });
+
+      const existingMember = await adminDb.collection("Members")
+        .where("groupId", "==", groupId)
+        .where("userId", "==", user.uid)
+        .limit(1)
+        .get();
+      if (!existingMember.empty) return NextResponse.json({ error: "User already joined this group" }, { status: 409 });
+
+      const group = groupSnap.data();
+      if (!group?.requireClaimApproval) {
+        await memberRef.update({
+          userId: user.uid,
+          updatedAt: FieldValue.serverTimestamp()
+        });
+        await writeAuditLog({
+          groupId,
+          operatorId: user.uid,
+          type: "MEMBER_CLAIMED",
+          targetType: "member",
+          targetId: memberId,
+          summary: "成员完成认领",
+          metadata: { approvalRequired: false }
+        });
+        return NextResponse.json({ success: true, status: "APPROVED" });
+      }
+
+      const pendingSnap = await adminDb.collection("ClaimRequests")
+        .where("groupId", "==", groupId)
+        .where("memberId", "==", memberId)
+        .where("requesterId", "==", user.uid)
+        .where("status", "==", "PENDING")
+        .limit(1)
+        .get();
+      if (!pendingSnap.empty) return NextResponse.json({ success: true, status: "PENDING" });
+
+      await adminDb.collection("ClaimRequests").doc().set({
+        groupId,
+        memberId,
+        memberName: member?.remarkName || "",
+        requesterId: user.uid,
+        requesterEmail: user.email || "",
+        requesterName: user.name || "",
+        status: "PENDING",
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp()
+      });
+      await writeAuditLog({
+        groupId,
+        operatorId: user.uid,
+        type: "CLAIM_REQUESTED",
+        targetType: "member",
+        targetId: memberId,
+        summary: "提交成员认领申请"
+      });
+      return NextResponse.json({ success: true, status: "PENDING" });
+    }
+    else if (action === "reviewClaim") {
+      const { requestId, decision } = data || {};
+      const requestRef = adminDb.collection("ClaimRequests").doc(requestId);
+      const requestSnap = await requestRef.get();
+      if (!requestSnap.exists) return NextResponse.json({ error: "Request not found" }, { status: 404 });
+      const claim = requestSnap.data();
+      const groupId = claim?.groupId;
+      if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      if (claim?.status !== "PENDING") return NextResponse.json({ error: "Request already reviewed" }, { status: 409 });
+
+      if (decision === "APPROVED") {
+        const memberRef = adminDb.collection("Members").doc(claim.memberId);
+        await adminDb.runTransaction(async (transaction) => {
+          const memberDoc = await transaction.get(memberRef);
+          if (!memberDoc.exists) throw new Error("Member not found");
+          if (memberDoc.data()?.userId) throw new Error("Member already claimed");
+          transaction.update(memberRef, {
+            userId: claim.requesterId,
+            updatedAt: FieldValue.serverTimestamp()
+          });
+          transaction.update(requestRef, {
+            status: "APPROVED",
+            reviewerId: user.uid,
+            updatedAt: FieldValue.serverTimestamp()
+          });
+        });
+      } else {
+        await requestRef.update({
+          status: "REJECTED",
+          reviewerId: user.uid,
+          updatedAt: FieldValue.serverTimestamp()
+        });
+      }
+
+      await writeAuditLog({
+        groupId,
+        operatorId: user.uid,
+        type: decision === "APPROVED" ? "CLAIM_APPROVED" : "CLAIM_REJECTED",
+        targetType: "claimRequest",
+        targetId: requestId,
+        summary: decision === "APPROVED" ? "通过成员认领申请" : "拒绝成员认领申请",
+        metadata: { memberId: claim.memberId, requesterId: claim.requesterId }
       });
       return NextResponse.json({ success: true });
     }
@@ -238,7 +563,7 @@ export async function POST(request: Request) {
         const rawLast = freshConfig.lastCalculatedAt;
         const freshLastDate = typeof rawLast.toDate === "function" ? rawLast.toDate() : new Date(rawLast);
         const days = (now.getTime() - freshLastDate.getTime()) / (1000 * 60 * 60 * 24);
-        const freq = freshConfig.frequency;
+        const freq = freshConfig.frequency as "daily" | "weekly" | "monthly" | "yearly";
         let freshPeriods = 0;
         if (freq === "daily") freshPeriods = Math.floor(days);
         else if (freq === "weekly") freshPeriods = Math.floor(days / 7);

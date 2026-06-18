@@ -13,6 +13,8 @@ interface Group {
   name: string;
   unit: string;
   createdAt: any;
+  role?: string;
+  myBalance?: number;
 }
 
 interface Member {
@@ -37,7 +39,7 @@ export default function DashboardPage() {
   const [joinGroupId, setJoinGroupId] = useState("");
 
   const { data, error, mutate } = useSWR(user ? '/api/groups' : null, fetcher, { refreshInterval: 5000 });
-  const groups = data?.groups || [];
+  const groups = (data?.groups || []) as Group[];
   const isSuperAdmin = data?.isSuperAdmin || false;
   const isLoadingGroups = !data && !error && !!user;
 

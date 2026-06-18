@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { getDocProxy, proxyRequest, queryProxy, updateDocProxy } from "@/lib/useFirestore";
+import { getDocProxy, proxyRequest, queryProxy } from "@/lib/useFirestore";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Suspense } from "react";
 
@@ -14,6 +14,35 @@ interface InterestConfig {
   lastCalculatedAt?: any;
 }
 
+interface MemberData {
+  id: string;
+  groupId: string;
+  userId: string | null;
+  role: string;
+  remarkName: string;
+  balance: number;
+}
+
+interface ClaimRequest {
+  id: string;
+  memberId: string;
+  memberName?: string;
+  requesterEmail?: string;
+  requesterName?: string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  createdAt?: any;
+}
+
+interface AuditLog {
+  id: string;
+  type: string;
+  summary: string;
+  operatorId: string;
+  createdAt?: any;
+}
+
+type AuditFilter = "ALL" | "MEMBER" | "BALANCE" | "CLAIM" | "SETTINGS";
+
 function GroupSettingsContent() {
   const searchParams = useSearchParams();
   const groupId = searchParams.get("id") as string;
@@ -22,18 +51,23 @@ function GroupSettingsContent() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isCreator, setIsCreator] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
   const [groupName, setGroupName] = useState("");
   const [groupUnit, setGroupUnit] = useState("");
   const [announcementText, setAnnouncementText] = useState("");
+  const [requireClaimApproval, setRequireClaimApproval] = useState(false);
   const [interestConfig, setInterestConfig] = useState<InterestConfig>({
     rate: 0,
     type: "none",
     frequency: "none"
   });
 
-  const [members, setMembers] = useState<any[]>([]);
+  const [members, setMembers] = useState<MemberData[]>([]);
+  const [claimRequests, setClaimRequests] = useState<ClaimRequest[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [auditFilter, setAuditFilter] = useState<AuditFilter>("ALL");
 
   useEffect(() => {
     const fetchAuthAndData = async () => {
@@ -42,22 +76,29 @@ function GroupSettingsContent() {
       const data = await getDocProxy("Groups", groupId);
       if (data) {
         const creatorId = data.creatorId || data.createdBy;
-        if (creatorId !== user.uid) {
-          alert("你没有权限访问设置页 (仅创建者可用)");
+        const fetchedMembers = await queryProxy("Members", [["groupId", "==", groupId]]) as MemberData[];
+        const currentMember = fetchedMembers.find(member => member.userId === user.uid);
+        const canManage = creatorId === user.uid || currentMember?.role === "OWNER" || currentMember?.role === "ADMIN" || currentMember?.role === "SUB_ADMIN";
+        if (!canManage) {
+          alert("你没有权限访问设置页");
           router.push(`/group/detail?id=${groupId}`);
           return;
         }
         setIsAdmin(true);
+        setIsCreator(creatorId === user.uid);
         setGroupName(data.name || "");
         setGroupUnit(data.unit || "瓶");
         setAnnouncementText(data.announcement || "");
+        setRequireClaimApproval(!!data.requireClaimApproval);
         if (data.interestConfig) {
           setInterestConfig(data.interestConfig);
         }
 
-        // Fetch all members
-        const fetchedMembers = await queryProxy("Members", [["groupId", "==", groupId]]);
         setMembers(fetchedMembers);
+        const fetchedClaims = await queryProxy("ClaimRequests", [["groupId", "==", groupId], ["status", "==", "PENDING"]], ["createdAt", "desc"]) as ClaimRequest[];
+        setClaimRequests(fetchedClaims);
+        const fetchedLogs = await queryProxy("AuditLogs", [["groupId", "==", groupId]], ["createdAt", "desc"], 80) as AuditLog[];
+        setAuditLogs(fetchedLogs);
       } else {
         router.push("/dashboard");
       }
@@ -72,11 +113,7 @@ function GroupSettingsContent() {
     if (!groupName.trim() || !groupUnit.trim()) return;
     setIsSaving(true);
     try {
-      await updateDocProxy("Groups", groupId, {
-        name: groupName.trim(),
-        unit: groupUnit.trim(),
-        announcement: announcementText.trim()
-      });
+      await proxyRequest({ action: "updateGroupBasic", data: { groupId, name: groupName.trim(), unit: groupUnit.trim(), announcement: announcementText.trim() } });
       alert("基础设置已保存");
     } catch (err) { alert("保存失败"); }
     finally { setIsSaving(false); }
@@ -86,7 +123,7 @@ function GroupSettingsContent() {
     e.preventDefault();
     setIsSaving(true);
     try {
-      await updateDocProxy("Groups", groupId, {
+      await proxyRequest({ action: "updateGroupInterest", data: { groupId,
         interestConfig: {
           ...interestConfig,
           rate: Number(interestConfig.rate) || 0,
@@ -95,7 +132,7 @@ function GroupSettingsContent() {
             ? { __serverTimestamp: true }
             : interestConfig.lastCalculatedAt || null
         }
-      });
+      }});
       alert("计息设置已保存");
     } catch (err) { alert("保存失败"); }
     finally { setIsSaving(false); }
@@ -121,6 +158,42 @@ function GroupSettingsContent() {
     }
   };
 
+  const handleSaveClaimApproval = async () => {
+    setIsSaving(true);
+    try {
+      await proxyRequest({ action: "updateGroupClaimApproval", data: { groupId, requireClaimApproval } });
+      alert("认领审核设置已保存");
+    } catch (err) {
+      alert("保存失败");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleReviewClaim = async (request: ClaimRequest, decision: "APPROVED" | "REJECTED") => {
+    setIsSaving(true);
+    try {
+      await proxyRequest({ action: "reviewClaim", data: { requestId: request.id, decision } });
+      setClaimRequests(prev => prev.filter(item => item.id !== request.id));
+      const fetchedMembers = await queryProxy("Members", [["groupId", "==", groupId]]) as MemberData[];
+      setMembers(fetchedMembers);
+      const fetchedLogs = await queryProxy("AuditLogs", [["groupId", "==", groupId]], ["createdAt", "desc"], 80) as AuditLog[];
+      setAuditLogs(fetchedLogs);
+    } catch (err: any) {
+      alert(err.message || "审核失败");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const filteredAuditLogs = auditLogs.filter(log => {
+    if (auditFilter === "ALL") return true;
+    if (auditFilter === "MEMBER") return log.type.startsWith("MEMBER") || log.type === "CREATOR_TRANSFER";
+    if (auditFilter === "BALANCE") return log.type.startsWith("BALANCE") || log.type === "INTEREST_SETTINGS_UPDATED";
+    if (auditFilter === "CLAIM") return log.type.startsWith("CLAIM");
+    return log.type.includes("SETTINGS");
+  });
+
   const renderPreview = () => {
     if (interestConfig.type === "none" || interestConfig.frequency === "none" || Number(interestConfig.rate) <= 0) {
       return <p className="text-sm text-gray-500">当前未开启计息，或参数未配置完整。</p>;
@@ -143,7 +216,7 @@ function GroupSettingsContent() {
     return (
       <div className="mt-4 bg-gray-50 dark:bg-gray-800/50 p-4 rounded-xl border border-gray-100 dark:border-gray-800">
         <h5 className="text-sm font-bold text-gray-900 dark:text-white mb-3">预览 (基于当前设置)</h5>
-        <div className="grid grid-cols-7 gap-2 text-center text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-7 gap-2 text-center text-xs">
           <div className="font-bold text-gray-500">初始</div>
           {[1, 2, 3, 4, 5, 6].map(i => <div key={i} className="font-bold text-gray-500">第 {i} 期</div>)}
           
@@ -183,7 +256,7 @@ function GroupSettingsContent() {
         
         {/* Basic Settings */}
         <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm">
-          <h2 className="text-xl font-extrabold text-gray-900 dark:text-white mb-6 flex items-center">
+            <h2 className="text-xl font-extrabold text-gray-900 dark:text-white mb-6 flex items-center">
             <span className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center mr-3">⚙️</span>
             基础设置
           </h2>
@@ -233,7 +306,7 @@ function GroupSettingsContent() {
                   <button 
                     onClick={async () => {
                       const newRole = m.role === "SUB_ADMIN" ? "MEMBER" : "SUB_ADMIN";
-                      await updateDocProxy("Members", m.id, { role: newRole });
+                      await proxyRequest({ action: "updateMemberRole", data: { groupId, memberId: m.id, role: newRole } });
                       setMembers(members.map(x => x.id === m.id ? { ...x, role: newRole } : x));
                     }}
                     className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${m.role === "SUB_ADMIN" ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 hover:bg-purple-200" : "bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"}`}
@@ -243,6 +316,79 @@ function GroupSettingsContent() {
                 </div>
               ))
             )}
+          </div>
+        </section>
+
+        {/* Claim Approval */}
+        <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm">
+          <h2 className="text-xl font-extrabold text-gray-900 dark:text-white mb-6 flex items-center">
+            <span className="w-8 h-8 rounded-lg bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 flex items-center justify-center mr-3">审</span>
+            成员认领审核
+          </h2>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-800">
+            <div>
+              <h3 className="font-bold text-gray-900 dark:text-white">认领需管理员审核</h3>
+              <p className="text-xs text-gray-500 mt-1">开启后，成员点击认领会先进入待审核列表。</p>
+            </div>
+            <label className="inline-flex items-center gap-3 text-sm font-bold text-gray-700 dark:text-gray-300">
+              <input type="checkbox" checked={requireClaimApproval} onChange={e => setRequireClaimApproval(e.target.checked)} className="h-5 w-5 accent-primary" />
+              {requireClaimApproval ? "已开启" : "已关闭"}
+            </label>
+          </div>
+          <button type="button" onClick={handleSaveClaimApproval} disabled={isSaving} className="mt-4 w-full py-3 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 transition-colors disabled:opacity-50">
+            保存认领设置
+          </button>
+
+          <div className="mt-6">
+            <h3 className="font-bold text-gray-900 dark:text-white mb-3">待审核申请</h3>
+            <div className="space-y-3">
+              {claimRequests.length === 0 ? (
+                <div className="text-center py-6 bg-gray-50 dark:bg-gray-800/50 rounded-xl text-gray-400 text-sm">暂无待审核申请</div>
+              ) : claimRequests.map(request => (
+                <div key={request.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
+                  <div>
+                    <h4 className="font-bold text-gray-900 dark:text-white">{request.memberName || request.memberId}</h4>
+                    <p className="text-xs text-gray-500 mt-1">{request.requesterName || request.requesterEmail || "未知用户"} 发起认领</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => handleReviewClaim(request, "REJECTED")} disabled={isSaving} className="flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-bold bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50">拒绝</button>
+                    <button type="button" onClick={() => handleReviewClaim(request, "APPROVED")} disabled={isSaving} className="flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-bold bg-primary text-white hover:bg-primary/90 disabled:opacity-50">通过</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Audit Logs */}
+        <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+            <h2 className="text-xl font-extrabold text-gray-900 dark:text-white flex items-center">
+              <span className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 flex items-center justify-center mr-3">志</span>
+              群组操作日志
+            </h2>
+            <select value={auditFilter} onChange={e => setAuditFilter(e.target.value as AuditFilter)} className="px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 text-sm outline-none focus:ring-2 focus:ring-primary">
+              <option value="ALL">全部类型</option>
+              <option value="MEMBER">人员调整</option>
+              <option value="BALANCE">余额调整</option>
+              <option value="CLAIM">认领审核</option>
+              <option value="SETTINGS">设置变更</option>
+            </select>
+          </div>
+          <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+            {filteredAuditLogs.length === 0 ? (
+              <div className="text-center py-6 bg-gray-50 dark:bg-gray-800/50 rounded-xl text-gray-400 text-sm">暂无匹配日志</div>
+            ) : filteredAuditLogs.map(log => (
+              <div key={log.id} className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
+                <div className="flex items-center justify-between gap-3">
+                  <h4 className="font-bold text-gray-900 dark:text-white">{log.summary}</h4>
+                  <span className="shrink-0 text-[11px] px-2 py-1 rounded-md bg-white dark:bg-gray-900 text-gray-500 border border-gray-200 dark:border-gray-700">{log.type}</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  {log.createdAt ? new Date(typeof log.createdAt === "string" ? log.createdAt : log.createdAt.seconds * 1000).toLocaleString() : "刚刚"}
+                </p>
+              </div>
+            ))}
           </div>
         </section>
 
@@ -289,7 +435,7 @@ function GroupSettingsContent() {
         </section>
 
         {/* Danger Zone */}
-        <section className="bg-red-50/50 dark:bg-red-900/10 rounded-3xl p-6 md:p-8 border border-red-100 dark:border-red-900/30">
+        {isCreator && <section className="bg-red-50/50 dark:bg-red-900/10 rounded-3xl p-6 md:p-8 border border-red-100 dark:border-red-900/30">
           <h2 className="text-xl font-extrabold text-red-600 dark:text-red-400 mb-2 flex items-center">
             <span className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center mr-3">⚠️</span>
             危险区域
@@ -305,7 +451,7 @@ function GroupSettingsContent() {
               彻底解散
             </button>
           </div>
-        </section>
+        </section>}
       </main>
     </div>
   );
