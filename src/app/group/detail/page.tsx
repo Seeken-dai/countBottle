@@ -391,9 +391,12 @@ function GroupDetailsContent() {
     if (!isAdmin || !selectedMember || !editRemarkName.trim()) return;
     setIsActionLoading(true);
     try {
-      await proxyRequest({ action: "updateMemberName", data: { groupId, memberId: selectedMember.id, remarkName: editRemarkName.trim() } });
-      setEditRemarkName("");
-    } catch (err) { alert("修改失败"); } 
+      const nextName = editRemarkName.trim();
+      await proxyRequest({ action: "updateMemberName", data: { groupId, memberId: selectedMember.id, remarkName: nextName } });
+      setMembers(prev => prev.map(member => member.id === selectedMember.id ? { ...member, remarkName: nextName } : member));
+      setEditRemarkName(nextName);
+      alert("成员昵称已保存");
+    } catch (err: any) { alert(err.message || "修改失败"); }
     finally { setIsActionLoading(false); }
   };
 

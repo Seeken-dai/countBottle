@@ -46,6 +46,27 @@ async function canManageGroup(groupId: string, uid: string) {
   return role === "OWNER" || role === "ADMIN" || role === "SUB_ADMIN";
 }
 
+function getUserDisplayName(user: { name?: string | null; email?: string | null }, fallback = "用户") {
+  const name = typeof user.name === "string" ? user.name.trim() : "";
+  if (name) return name;
+  const email = typeof user.email === "string" ? user.email.trim() : "";
+  if (email) return email.split("@")[0] || email;
+  return fallback;
+}
+
+function getMemberDisplayName(member: any, fallback = "成员") {
+  const remarkName = typeof member?.remarkName === "string" ? member.remarkName.trim() : "";
+  if (remarkName) return remarkName;
+  const displayName = typeof member?.displayName === "string" ? member.displayName.trim() : "";
+  return displayName || fallback;
+}
+
+function getRoleDisplayName(role: string) {
+  if (role === "SUB_ADMIN") return "子管理员";
+  if (role === "ADMIN" || role === "OWNER") return "管理员";
+  return "普通成员";
+}
+
 async function writeAuditLog({
   groupId,
   operatorId,
@@ -53,7 +74,15 @@ async function writeAuditLog({
   targetType,
   targetId,
   summary,
-  metadata = {}
+  metadata = {},
+  actorName,
+  targetName,
+  amount,
+  beforeBalance,
+  afterBalance,
+  note,
+  displayTitle,
+  displayDetail
 }: {
   groupId: string;
   operatorId: string;
@@ -62,6 +91,14 @@ async function writeAuditLog({
   targetId?: string;
   summary: string;
   metadata?: Record<string, unknown>;
+  actorName?: string;
+  targetName?: string;
+  amount?: number;
+  beforeBalance?: number;
+  afterBalance?: number;
+  note?: string;
+  displayTitle?: string;
+  displayDetail?: string;
 }) {
   await adminDb.collection("AuditLogs").doc().set({
     groupId,
@@ -71,6 +108,14 @@ async function writeAuditLog({
     targetId: targetId || null,
     summary,
     metadata,
+    actorName: actorName || null,
+    targetName: targetName || null,
+    amount: typeof amount === "number" ? amount : null,
+    beforeBalance: typeof beforeBalance === "number" ? beforeBalance : null,
+    afterBalance: typeof afterBalance === "number" ? afterBalance : null,
+    note: note || null,
+    displayTitle: displayTitle || null,
+    displayDetail: displayDetail || null,
     createdAt: FieldValue.serverTimestamp()
   });
 }
@@ -82,6 +127,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { action, collection, docId, data, where, orderBy, limit } = body;
+    const actorName = getUserDisplayName(user);
 
     if (action === "query") {
       const ref = adminDb.collection(collection);
@@ -167,7 +213,11 @@ export async function POST(request: Request) {
         targetType: "member",
         targetId: memberId,
         summary: "超管移交群主",
-        metadata: { newCreatorId }
+        metadata: { newCreatorId },
+        actorName,
+        targetName: newCreatorId,
+        displayTitle: `${actorName}移交了群主身份`,
+        displayDetail: "群组创建人已更新，原群主权限同步调整为管理员。"
       });
       return NextResponse.json({ success: true });
     }
@@ -194,7 +244,11 @@ export async function POST(request: Request) {
         type: "MEMBER_ADDED",
         targetType: "member",
         targetId: memberRef.id,
-        summary: `新增成员：${trimmedName}`
+        summary: `新增成员：${trimmedName}`,
+        actorName,
+        targetName: trimmedName,
+        displayTitle: `${actorName}新增了成员 ${trimmedName}`,
+        displayDetail: "新增成员卡片后，可由本人认领或由管理员代为记账。"
       });
       return NextResponse.json({ success: true, id: memberRef.id });
     }
@@ -213,7 +267,11 @@ export async function POST(request: Request) {
         type: "GROUP_SETTINGS_UPDATED",
         targetType: "group",
         targetId: groupId,
-        summary: "更新群组基础设置"
+        summary: "更新群组基础设置",
+        actorName,
+        targetName: String(name || "").trim(),
+        displayTitle: `${actorName}更新了群组基础设置`,
+        displayDetail: `群组名称：${String(name || "").trim() || "未填写"}；单位：${String(unit || "").trim() || "未填写"}`
       });
       return NextResponse.json({ success: true });
     }
@@ -230,7 +288,10 @@ export async function POST(request: Request) {
         type: "CLAIM_APPROVAL_SETTING_UPDATED",
         targetType: "group",
         targetId: groupId,
-        summary: !!requireClaimApproval ? "开启认领审核" : "关闭认领审核"
+        summary: !!requireClaimApproval ? "开启认领审核" : "关闭认领审核",
+        actorName,
+        displayTitle: `${actorName}${requireClaimApproval ? "开启" : "关闭"}了认领审核`,
+        displayDetail: requireClaimApproval ? "成员认领需要管理员审核通过后生效。" : "成员可以直接认领空白成员卡片。"
       });
       return NextResponse.json({ success: true });
     }
@@ -252,7 +313,10 @@ export async function POST(request: Request) {
         targetType: "group",
         targetId: groupId,
         summary: "更新计息规则",
-        metadata: { type: interestConfig?.type, frequency: interestConfig?.frequency, rate: Number(interestConfig?.rate) || 0 }
+        metadata: { type: interestConfig?.type, frequency: interestConfig?.frequency, rate: Number(interestConfig?.rate) || 0 },
+        actorName,
+        displayTitle: `${actorName}更新了计息规则`,
+        displayDetail: `类型：${interestConfig?.type || "none"}；频率：${interestConfig?.frequency || "none"}；利率：${Number(interestConfig?.rate) || 0}%`
       });
       return NextResponse.json({ success: true });
     }
@@ -260,6 +324,8 @@ export async function POST(request: Request) {
       const { groupId, memberId, role } = data || {};
       if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       if (!["MEMBER", "ADMIN", "SUB_ADMIN"].includes(role)) return NextResponse.json({ error: "Invalid role" }, { status: 400 });
+      const memberSnap = await adminDb.collection("Members").doc(memberId).get();
+      const memberName = getMemberDisplayName(memberSnap.data());
       await adminDb.collection("Members").doc(memberId).update({
         role,
         updatedAt: FieldValue.serverTimestamp()
@@ -270,7 +336,11 @@ export async function POST(request: Request) {
         type: "MEMBER_ROLE_UPDATED",
         targetType: "member",
         targetId: memberId,
-        summary: `调整成员权限为 ${role}`
+        summary: `调整成员权限为 ${role}`,
+        actorName,
+        targetName: memberName,
+        displayTitle: `${actorName}将${memberName}的权限调整为${getRoleDisplayName(role)}`,
+        displayDetail: `新的成员权限：${getRoleDisplayName(role)}`
       });
       return NextResponse.json({ success: true });
     }
@@ -279,6 +349,8 @@ export async function POST(request: Request) {
       if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       const trimmedName = typeof remarkName === "string" ? remarkName.trim().slice(0, 20) : "";
       if (!trimmedName) return NextResponse.json({ error: "Invalid member name" }, { status: 400 });
+      const memberSnap = await adminDb.collection("Members").doc(memberId).get();
+      const oldName = getMemberDisplayName(memberSnap.data());
       await adminDb.collection("Members").doc(memberId).update({
         remarkName: trimmedName,
         updatedAt: FieldValue.serverTimestamp()
@@ -289,13 +361,19 @@ export async function POST(request: Request) {
         type: "MEMBER_NAME_UPDATED",
         targetType: "member",
         targetId: memberId,
-        summary: `修改成员昵称：${trimmedName}`
+        summary: `修改成员昵称：${trimmedName}`,
+        actorName,
+        targetName: trimmedName,
+        displayTitle: `${actorName}将${oldName}昵称改为${trimmedName}`,
+        displayDetail: `原昵称：${oldName}；新昵称：${trimmedName}`
       });
       return NextResponse.json({ success: true });
     }
     else if (action === "unbindMember") {
       const { groupId, memberId } = data || {};
       if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      const memberSnap = await adminDb.collection("Members").doc(memberId).get();
+      const memberName = getMemberDisplayName(memberSnap.data());
       await adminDb.collection("Members").doc(memberId).update({
         userId: null,
         updatedAt: FieldValue.serverTimestamp()
@@ -306,13 +384,19 @@ export async function POST(request: Request) {
         type: "MEMBER_UNBOUND",
         targetType: "member",
         targetId: memberId,
-        summary: "强制解绑成员账号"
+        summary: "强制解绑成员账号",
+        actorName,
+        targetName: memberName,
+        displayTitle: `${actorName}解绑了${memberName}的账号`,
+        displayDetail: "该成员卡片恢复为未认领状态，历史流水保留。"
       });
       return NextResponse.json({ success: true });
     }
     else if (action === "deleteMember") {
       const { groupId, memberId } = data || {};
       if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      const memberSnap = await adminDb.collection("Members").doc(memberId).get();
+      const memberName = getMemberDisplayName(memberSnap.data());
       await adminDb.collection("Members").doc(memberId).delete();
       await writeAuditLog({
         groupId,
@@ -320,7 +404,11 @@ export async function POST(request: Request) {
         type: "MEMBER_DELETED",
         targetType: "member",
         targetId: memberId,
-        summary: "删除成员卡片"
+        summary: "删除成员卡片",
+        actorName,
+        targetName: memberName,
+        displayTitle: `${actorName}删除了成员 ${memberName}`,
+        displayDetail: "成员卡片已删除，相关历史记录可能仍保留在流水中。"
       });
       return NextResponse.json({ success: true });
     }
@@ -332,6 +420,9 @@ export async function POST(request: Request) {
       const member = memberSnap.data();
       if (member?.groupId !== groupId) return NextResponse.json({ error: "Invalid member group" }, { status: 400 });
       if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      const memberName = getMemberDisplayName(member);
+      const beforeBalance = Number(member?.balance || 0);
+      const afterBalance = beforeBalance + 1;
 
       const recordRef = adminDb.collection("Records").doc();
       await adminDb.runTransaction(async (transaction) => {
@@ -357,7 +448,14 @@ export async function POST(request: Request) {
         targetType: "member",
         targetId: memberId,
         summary: "快速增加 1",
-        metadata: { amount: 1 }
+        metadata: { amount: 1 },
+        actorName,
+        targetName: memberName,
+        amount: 1,
+        beforeBalance,
+        afterBalance,
+        displayTitle: `${actorName}给${memberName}快速记了一笔 +1`,
+        displayDetail: `余额从 ${beforeBalance} 调整为 ${afterBalance}`
       });
       return NextResponse.json({ success: true });
     }
@@ -377,6 +475,11 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
 
+      const memberName = getMemberDisplayName(member);
+      const cleanedNote = typeof note === "string" ? note.trim().slice(0, 200) : "";
+      let beforeBalance = 0;
+      let afterBalance = 0;
+
       await adminDb.runTransaction(async (transaction) => {
         const memberDoc = await transaction.get(memberRef);
         if (!memberDoc.exists) throw new Error("成员不存在");
@@ -395,6 +498,8 @@ export async function POST(request: Request) {
           if (amount > currentBalance) newTotalAdded += amount - currentBalance;
           newBalance = amount;
         }
+        beforeBalance = currentBalance;
+        afterBalance = newBalance;
 
         transaction.update(memberRef, {
           balance: newBalance,
@@ -407,10 +512,15 @@ export async function POST(request: Request) {
           operatorId: user.uid,
           type: recordActionType,
           amount: recordActionType === "SET" ? newBalance : amount,
-          note: typeof note === "string" ? note.trim().slice(0, 200) : "",
+          note: cleanedNote,
           createdAt: FieldValue.serverTimestamp()
         });
       });
+      const actionTitle = recordActionType === "ADD"
+        ? `${actorName}给${memberName}记了一笔 +${amount}`
+        : recordActionType === "DEDUCT"
+          ? `${actorName}为${memberName}核销了 ${amount}`
+          : `${actorName}将${memberName}余额调为 ${afterBalance}`;
       await writeAuditLog({
         groupId,
         operatorId: user.uid,
@@ -420,8 +530,16 @@ export async function POST(request: Request) {
         summary: `调整成员余额：${recordActionType}`,
         metadata: {
           amount,
-          note: typeof note === "string" ? note.trim().slice(0, 200) : ""
-        }
+          note: cleanedNote
+        },
+        actorName,
+        targetName: memberName,
+        amount: recordActionType === "SET" ? afterBalance : amount,
+        beforeBalance,
+        afterBalance,
+        note: cleanedNote,
+        displayTitle: actionTitle,
+        displayDetail: `余额从 ${beforeBalance} 调整为 ${afterBalance}`
       });
       return NextResponse.json({ success: true });
     }
@@ -445,6 +563,7 @@ export async function POST(request: Request) {
       if (!existingMember.empty) return NextResponse.json({ error: "User already joined this group" }, { status: 409 });
 
       const group = groupSnap.data();
+      const memberName = getMemberDisplayName(member);
       if (!group?.requireClaimApproval) {
         await memberRef.update({
           userId: user.uid,
@@ -457,7 +576,11 @@ export async function POST(request: Request) {
           targetType: "member",
           targetId: memberId,
           summary: "成员完成认领",
-          metadata: { approvalRequired: false }
+          metadata: { approvalRequired: false },
+          actorName,
+          targetName: memberName,
+          displayTitle: `${actorName}认领了成员 ${memberName}`,
+          displayDetail: "该成员卡片已绑定到当前账号。"
         });
         return NextResponse.json({ success: true, status: "APPROVED" });
       }
@@ -488,7 +611,11 @@ export async function POST(request: Request) {
         type: "CLAIM_REQUESTED",
         targetType: "member",
         targetId: memberId,
-        summary: "提交成员认领申请"
+        summary: "提交成员认领申请",
+        actorName,
+        targetName: memberName,
+        displayTitle: `${actorName}提交了${memberName}的认领申请`,
+        displayDetail: "申请已进入待审核列表。"
       });
       return NextResponse.json({ success: true, status: "PENDING" });
     }
@@ -533,7 +660,13 @@ export async function POST(request: Request) {
         targetType: "claimRequest",
         targetId: requestId,
         summary: decision === "APPROVED" ? "通过成员认领申请" : "拒绝成员认领申请",
-        metadata: { memberId: claim.memberId, requesterId: claim.requesterId }
+        metadata: { memberId: claim.memberId, requesterId: claim.requesterId },
+        actorName,
+        targetName: claim.memberName || claim.memberId,
+        displayTitle: decision === "APPROVED"
+          ? `${actorName}通过了${claim.memberName || "成员"}的认领申请`
+          : `${actorName}拒绝了${claim.memberName || "成员"}的认领申请`,
+        displayDetail: `申请人：${claim.requesterName || claim.requesterEmail || claim.requesterId || "未知用户"}`
       });
       return NextResponse.json({ success: true });
     }

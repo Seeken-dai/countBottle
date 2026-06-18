@@ -38,10 +38,38 @@ interface AuditLog {
   type: string;
   summary: string;
   operatorId: string;
+  targetType?: string | null;
+  targetId?: string | null;
+  actorName?: string | null;
+  targetName?: string | null;
+  amount?: number | null;
+  beforeBalance?: number | null;
+  afterBalance?: number | null;
+  note?: string | null;
+  displayTitle?: string | null;
+  displayDetail?: string | null;
+  metadata?: {
+    amount?: number;
+    note?: string;
+    type?: string;
+    frequency?: string;
+    rate?: number;
+    [key: string]: unknown;
+  };
   createdAt?: any;
 }
 
-type AuditFilter = "ALL" | "MEMBER" | "BALANCE" | "CLAIM" | "SETTINGS";
+type AuditFilter = "ALL" | "BALANCE" | "MEMBER" | "CLAIM" | "SETTINGS" | "INTEREST";
+type AuditCategory = Exclude<AuditFilter, "ALL">;
+
+const auditFilters: { value: AuditFilter; label: string }[] = [
+  { value: "ALL", label: "全部" },
+  { value: "BALANCE", label: "余额变化" },
+  { value: "MEMBER", label: "成员变更" },
+  { value: "CLAIM", label: "认领审核" },
+  { value: "SETTINGS", label: "群组设置" },
+  { value: "INTEREST", label: "计息相关" }
+];
 
 function getTimeValue(value: any) {
   if (!value) return 0;
@@ -50,6 +78,98 @@ function getTimeValue(value: any) {
   if (typeof value.seconds === "number") return value.seconds * 1000;
   if (typeof value._seconds === "number") return value._seconds * 1000;
   return 0;
+}
+
+function formatAuditTime(value: any) {
+  const timeValue = getTimeValue(value);
+  if (!timeValue) return "刚刚";
+  const date = new Date(timeValue);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfLogDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const timeText = date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  if (startOfLogDay === startOfToday) return `今天 ${timeText}`;
+  if (startOfLogDay === startOfToday - 24 * 60 * 60 * 1000) return `昨天 ${timeText}`;
+  return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function getAuditCategory(type = ""): AuditCategory {
+  if (type.startsWith("BALANCE")) return "BALANCE";
+  if (type.startsWith("MEMBER") || type === "CREATOR_TRANSFER") return "MEMBER";
+  if (type.startsWith("CLAIM")) return "CLAIM";
+  if (type.startsWith("INTEREST")) return "INTEREST";
+  return "SETTINGS";
+}
+
+function getAuditTag(log: AuditLog) {
+  const tags: Record<string, string> = {
+    BALANCE_ADD: "余额增加",
+    BALANCE_DEDUCT: "余额核销",
+    BALANCE_SET: "余额调平",
+    MEMBER_ADDED: "新增成员",
+    MEMBER_ROLE_UPDATED: "权限调整",
+    MEMBER_NAME_UPDATED: "修改昵称",
+    MEMBER_UNBOUND: "解绑账号",
+    MEMBER_DELETED: "删除成员",
+    MEMBER_CLAIMED: "成员认领",
+    CLAIM_REQUESTED: "认领申请",
+    CLAIM_APPROVED: "认领通过",
+    CLAIM_REJECTED: "认领拒绝",
+    CLAIM_APPROVAL_SETTING_UPDATED: "认领设置",
+    GROUP_SETTINGS_UPDATED: "群组设置",
+    INTEREST_SETTINGS_UPDATED: "计息设置",
+    CREATOR_TRANSFER: "群主移交"
+  };
+  return tags[log.type] || "系统记录";
+}
+
+function getAuditTone(log: AuditLog) {
+  const category = getAuditCategory(log.type);
+  if (category === "BALANCE") return "bg-indigo-50 text-indigo-700 border-indigo-100 dark:bg-indigo-900/20 dark:text-indigo-300 dark:border-indigo-900/40";
+  if (category === "MEMBER") return "bg-purple-50 text-purple-700 border-purple-100 dark:bg-purple-900/20 dark:text-purple-300 dark:border-purple-900/40";
+  if (category === "CLAIM") return "bg-amber-50 text-amber-700 border-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-900/40";
+  if (category === "INTEREST") return "bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-900/40";
+  return "bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700";
+}
+
+function cleanLegacySummary(summary?: string) {
+  const text = (summary || "").trim();
+  if (!text) return "";
+  return text
+    .replace(/：\s*(ADD|DEDUCT|SET)\s*$/i, "")
+    .replace(/\b(BALANCE|MEMBER|CLAIM|GROUP|INTEREST)_[A-Z_]+\b/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function getAuditTitle(log: AuditLog) {
+  if (log.displayTitle) return log.displayTitle;
+  const targetName = log.targetName || "成员";
+  const amount = typeof log.amount === "number" ? log.amount : log.metadata?.amount;
+  if (log.type === "BALANCE_ADD") return amount ? `给${targetName}记了一笔 +${amount}` : cleanLegacySummary(log.summary) || "记录了一笔增加";
+  if (log.type === "BALANCE_DEDUCT") return amount ? `为${targetName}核销了 ${amount}` : "核销了成员余额";
+  if (log.type === "BALANCE_SET") return typeof log.afterBalance === "number" ? `将${targetName}余额调为 ${log.afterBalance}` : "调整了成员余额";
+  if (log.type === "MEMBER_NAME_UPDATED") return cleanLegacySummary(log.summary) || "修改了成员昵称";
+  if (log.type === "INTEREST_SETTINGS_UPDATED") return "更新了计息规则";
+  return cleanLegacySummary(log.summary) || getAuditTag(log);
+}
+
+function getAuditNote(log: AuditLog) {
+  const note = log.note || log.metadata?.note;
+  return typeof note === "string" && note.trim() ? note.trim() : "";
+}
+
+function getAuditDetailRows(log: AuditLog) {
+  const rows: { label: string; value: string }[] = [];
+  if (log.actorName) rows.push({ label: "操作者", value: log.actorName });
+  if (log.targetName) rows.push({ label: "对象", value: log.targetName });
+  const amount = typeof log.amount === "number" ? log.amount : log.metadata?.amount;
+  if (typeof amount === "number") rows.push({ label: "数量", value: String(amount) });
+  if (typeof log.beforeBalance === "number" && typeof log.afterBalance === "number") {
+    rows.push({ label: "余额变化", value: `${log.beforeBalance} → ${log.afterBalance}` });
+  }
+  if (log.displayDetail) rows.push({ label: "说明", value: log.displayDetail });
+  return rows;
 }
 
 function GroupSettingsContent() {
@@ -77,6 +197,7 @@ function GroupSettingsContent() {
   const [claimRequests, setClaimRequests] = useState<ClaimRequest[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [auditFilter, setAuditFilter] = useState<AuditFilter>("ALL");
+  const [expandedAuditLogIds, setExpandedAuditLogIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const fetchAuthAndData = async () => {
@@ -200,11 +321,17 @@ function GroupSettingsContent() {
 
   const filteredAuditLogs = auditLogs.filter(log => {
     if (auditFilter === "ALL") return true;
-    if (auditFilter === "MEMBER") return log.type.startsWith("MEMBER") || log.type === "CREATOR_TRANSFER";
-    if (auditFilter === "BALANCE") return log.type.startsWith("BALANCE") || log.type === "INTEREST_SETTINGS_UPDATED";
-    if (auditFilter === "CLAIM") return log.type.startsWith("CLAIM");
-    return log.type.includes("SETTINGS");
+    return getAuditCategory(log.type) === auditFilter;
   });
+
+  const toggleAuditDetail = (logId: string) => {
+    setExpandedAuditLogIds(prev => {
+      const next = new Set(prev);
+      if (next.has(logId)) next.delete(logId);
+      else next.add(logId);
+      return next;
+    });
+  };
 
   const renderPreview = () => {
     if (interestConfig.type === "none" || interestConfig.frequency === "none" || Number(interestConfig.rate) <= 0) {
@@ -390,27 +517,67 @@ function GroupSettingsContent() {
               群组操作日志
             </h2>
             <select value={auditFilter} onChange={e => setAuditFilter(e.target.value as AuditFilter)} className="px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 text-sm outline-none focus:ring-2 focus:ring-primary">
-              <option value="ALL">全部类型</option>
-              <option value="MEMBER">人员调整</option>
-              <option value="BALANCE">余额调整</option>
-              <option value="CLAIM">认领审核</option>
-              <option value="SETTINGS">设置变更</option>
+              {auditFilters.map(filter => (
+                <option key={filter.value} value={filter.value}>{filter.label}</option>
+              ))}
             </select>
           </div>
           <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
             {filteredAuditLogs.length === 0 ? (
               <div className="text-center py-6 bg-gray-50 dark:bg-gray-800/50 rounded-xl text-gray-400 text-sm">暂无匹配日志</div>
-            ) : filteredAuditLogs.map(log => (
-              <div key={log.id} className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
-                <div className="flex items-center justify-between gap-3">
-                  <h4 className="font-bold text-gray-900 dark:text-white">{log.summary}</h4>
-                  <span className="shrink-0 text-[11px] px-2 py-1 rounded-md bg-white dark:bg-gray-900 text-gray-500 border border-gray-200 dark:border-gray-700">{log.type}</span>
+            ) : filteredAuditLogs.map(log => {
+              const detailRows = getAuditDetailRows(log);
+              const note = getAuditNote(log);
+              const isExpanded = expandedAuditLogIds.has(log.id);
+              const amount = typeof log.amount === "number" ? log.amount : log.metadata?.amount;
+              const showAmount = getAuditCategory(log.type) === "BALANCE" && typeof amount === "number";
+              return (
+                <div key={log.id} className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-800">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h4 className="font-bold text-gray-900 dark:text-white leading-snug break-words">{getAuditTitle(log)}</h4>
+                      <p className="text-xs text-gray-500 mt-1">{formatAuditTime(log.createdAt)}</p>
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-2">
+                      <span className={`text-[11px] px-2 py-1 rounded-full border font-medium ${getAuditTone(log)}`}>{getAuditTag(log)}</span>
+                      {showAmount && (
+                        <span className={`text-sm font-black ${log.type === "BALANCE_DEDUCT" ? "text-orange-500" : "text-primary"}`}>
+                          {log.type === "BALANCE_DEDUCT" ? "-" : log.type === "BALANCE_SET" ? "=" : "+"}{amount}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {note && (
+                    <p className="mt-3 rounded-xl bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 border border-gray-100 dark:border-gray-800 break-words">
+                      备注：{note}
+                    </p>
+                  )}
+
+                  {detailRows.length > 0 && (
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleAuditDetail(log.id)}
+                        className="text-xs font-bold text-primary hover:text-primary/80 transition-colors"
+                      >
+                        {isExpanded ? "收起详情" : "查看详情"}
+                      </button>
+                      {isExpanded && (
+                        <dl className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          {detailRows.map(row => (
+                            <div key={`${log.id}-${row.label}`} className="rounded-lg bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 px-3 py-2">
+                              <dt className="text-gray-400 mb-1">{row.label}</dt>
+                              <dd className="text-gray-700 dark:text-gray-300 break-words">{row.value}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  {log.createdAt ? new Date(typeof log.createdAt === "string" ? log.createdAt : log.createdAt.seconds * 1000).toLocaleString() : "刚刚"}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
 
