@@ -140,7 +140,7 @@ function GroupDetailsContent() {
         if (m.userId) {
           const uData = await getDocProxy("Users", m.userId);
           if (uData) {
-            return { ...m, displayName: uData.displayName, photoURL: uData.photoURL };
+            return { ...m, displayName: uData.displayName };
           }
         }
         return m;
@@ -485,7 +485,7 @@ function GroupDetailsContent() {
                   {/* Left: Avatar and Info */}
                   <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
                     <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-tr from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center text-base sm:text-lg font-bold text-gray-500 dark:text-gray-400 overflow-hidden shrink-0">
-                      {member.photoURL ? <img src={member.photoURL} alt="avatar" className="w-full h-full object-cover" /> : (member.displayName || member.remarkName).charAt(0).toUpperCase()}
+                      {(member.displayName || member.remarkName).charAt(0).toUpperCase()}
                     </div>
                     <div className="truncate flex flex-col justify-center">
                       <h3 className="text-sm sm:text-lg font-bold text-gray-900 dark:text-white flex items-center gap-1.5 sm:gap-2 truncate">
@@ -664,7 +664,7 @@ function GroupDetailsContent() {
               <div key={member.id} className="bg-white dark:bg-gray-900 rounded-xl p-3 shadow-sm border border-gray-100 dark:border-gray-800 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center font-bold text-gray-500 dark:text-gray-400 overflow-hidden shrink-0">
-                    {member.photoURL ? <img src={member.photoURL} alt="avatar" className="w-full h-full object-cover" crossOrigin="anonymous" /> : (member.displayName || member.remarkName).charAt(0).toUpperCase()}
+                    {(member.displayName || member.remarkName).charAt(0).toUpperCase()}
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-1.5">

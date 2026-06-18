@@ -275,7 +275,7 @@ export default function AdminPage() {
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center font-bold text-gray-500 dark:text-gray-400 overflow-hidden shrink-0">
-                            {u.photoURL ? <img src={u.photoURL} alt="avatar" className="w-full h-full object-cover" /> : u.displayName?.charAt(0).toUpperCase()}
+                            {(u.displayName || u.email || "U").charAt(0).toUpperCase()}
                           </div>
                           <span className="font-bold text-gray-900 dark:text-white">{u.displayName}</span>
                         </div>

@@ -22,7 +22,7 @@ export async function GET() {
         uid: decodedClaims.uid,
         email: decodedClaims.email || null,
         displayName: decodedClaims.name || decodedClaims.email?.split("@")[0] || null,
-        photoURL: decodedClaims.picture || null,
+        photoURL: null,
       }
     });
   } catch {

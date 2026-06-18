@@ -1,80 +1,43 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { storage } from "@/lib/firebase";
-import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { proxyRequest } from "@/lib/useFirestore";
 
+function getInitial(name?: string | null, email?: string | null) {
+  return (name || email?.split("@")[0] || "U").trim().charAt(0).toUpperCase();
+}
+
 export default function ProfilePage() {
-  const { user } = useAuth();
+  const { user, mutateUser } = useAuth();
   const router = useRouter();
 
   const [displayName, setDisplayName] = useState("");
-  const [photoURL, setPhotoURL] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (user) {
       setDisplayName(user.displayName || "");
-      setPhotoURL(user.photoURL || "");
     }
   }, [user]);
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !user) return;
-    
-    if (file.size > 5 * 1024 * 1024) {
-      alert("图片过大，请选择5MB以内的图片");
-      return;
-    }
-
-    setIsUploading(true);
-    const storageRef = ref(storage, `avatars/${user.uid}/${Date.now()}_${file.name}`);
-    const uploadTask = uploadBytesResumable(storageRef, file);
-
-    uploadTask.on('state_changed', 
-      (snapshot) => {
-        // You could track progress here if needed
-      }, 
-      (error) => {
-        console.error("上传失败:", error);
-        alert("图片上传失败，请检查 Firebase Storage 权限设置");
-        setIsUploading(false);
-      }, 
-      async () => {
-        const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-        setPhotoURL(downloadURL);
-        setIsUploading(false);
-      }
-    );
-  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
-    if (isUploading) {
-      alert("图片正在上传中，请稍后...");
-      return;
-    }
+
     setIsLoading(true);
-    
     try {
       await proxyRequest({
         action: "updateProfile",
         data: {
           displayName: displayName.trim(),
-          photoURL: photoURL.trim()
-        }
+        },
       });
 
-      alert("个人资料保存成功！");
+      mutateUser();
+      alert("个人资料已保存");
       router.push("/dashboard");
     } catch (err) {
       alert("保存失败，请重试");
@@ -105,48 +68,27 @@ export default function ProfilePage() {
       <main className="max-w-xl mx-auto px-4 sm:px-6 py-12">
         <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm">
           <div className="flex flex-col items-center mb-8">
-            <div 
-              onClick={() => fileInputRef.current?.click()}
-              className="relative w-24 h-24 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-3xl font-bold text-gray-400 overflow-hidden mb-4 shadow-inner cursor-pointer group hover:ring-4 hover:ring-primary/20 transition-all"
-            >
-              {isUploading ? (
-                <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white z-10">
-                  <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                </div>
-              ) : (
-                <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                  点击上传
-                </div>
-              )}
-              {photoURL ? (
-                <img src={photoURL} alt="Avatar" className="w-full h-full object-cover relative z-0" />
-              ) : (
-                <span className="relative z-0">{(displayName || user.email?.split('@')[0] || "U").charAt(0).toUpperCase()}</span>
-              )}
+            <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-primary/15 to-blue-500/15 dark:from-primary/25 dark:to-blue-500/20 flex items-center justify-center text-3xl font-black text-primary mb-4 shadow-inner border border-primary/10">
+              {getInitial(displayName, user.email)}
             </div>
-            <input 
-              type="file" 
-              accept="image/*" 
-              className="hidden" 
-              ref={fileInputRef} 
-              onChange={handleFileChange} 
-            />
             <h2 className="text-xl font-bold text-gray-900 dark:text-white">{user.email}</h2>
             <div className="mt-2 text-xs font-mono bg-gray-100 dark:bg-gray-800 text-gray-500 px-3 py-1.5 rounded-lg flex items-center gap-2 border border-gray-200 dark:border-gray-700">
               UID: {user.uid}
-              <button 
+              <button
                 type="button"
                 onClick={(e) => {
                   e.preventDefault();
                   navigator.clipboard.writeText(user.uid);
-                  alert("UID 已复制！");
+                  alert("UID 已复制");
                 }}
                 className="text-primary hover:text-primary/80 font-bold ml-1"
               >
                 复制
               </button>
             </div>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-3">系统会自动同步你的昵称和头像到群组中</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-3 text-center">
+              系统会根据你的昵称或邮箱首字生成头像，并同步展示到群组成员卡片中。
+            </p>
           </div>
 
           <form onSubmit={handleSave} className="space-y-6">
@@ -166,7 +108,7 @@ export default function ProfilePage() {
 
             <button
               type="submit"
-              disabled={isLoading || isUploading}
+              disabled={isLoading}
               className="w-full py-3.5 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 transition-colors disabled:opacity-50 mt-4"
             >
               {isLoading ? "保存中..." : "保存个人资料"}

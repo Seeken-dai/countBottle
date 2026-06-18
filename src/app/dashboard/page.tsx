@@ -109,7 +109,7 @@ export default function DashboardPage() {
             <div className="flex items-center gap-3 border-l pl-4 border-gray-200 dark:border-gray-700">
               <Link href="/profile" className="text-sm font-bold text-gray-700 dark:text-gray-300 flex items-center gap-2 hover:text-primary transition-colors cursor-pointer">
                 <div className="w-7 h-7 sm:w-6 sm:h-6 rounded-full bg-gray-200 dark:bg-gray-800 flex items-center justify-center overflow-hidden shrink-0 border border-gray-300 dark:border-gray-600">
-                  {user.photoURL ? <img src={user.photoURL} alt="avatar" className="w-full h-full object-cover" /> : (user.displayName || user.email || "U").charAt(0).toUpperCase()}
+                  {(user.displayName || user.email || "U").charAt(0).toUpperCase()}
                 </div>
                 <span className="hidden sm:inline-block">{user.displayName || user.email?.split('@')[0]}</span>
               </Link>

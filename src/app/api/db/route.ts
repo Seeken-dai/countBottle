@@ -215,13 +215,13 @@ export async function POST(request: Request) {
     else if (action === "updateProfile") {
       await adminAuth.updateUser(user.uid, {
         displayName: data.displayName || undefined,
-        photoURL: data.photoURL || undefined
+        photoURL: null
       });
       await adminDb.collection("Users").doc(user.uid).set(resolveSentinels({
         uid: user.uid,
         email: user.email || null,
         displayName: data.displayName,
-        photoURL: data.photoURL,
+        photoURL: null,
         updatedAt: FieldValue.serverTimestamp()
       }), { merge: true });
       return NextResponse.json({ success: true });

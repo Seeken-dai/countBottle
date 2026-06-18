@@ -223,7 +223,7 @@ function GroupSettingsContent() {
                 <div key={m.id} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center text-lg font-bold text-gray-500 dark:text-gray-400 overflow-hidden shrink-0">
-                      {m.photoURL ? <img src={m.photoURL} alt="avatar" className="w-full h-full object-cover" /> : m.remarkName.charAt(0).toUpperCase()}
+                      {m.remarkName.charAt(0).toUpperCase()}
                     </div>
                     <div>
                       <h4 className="font-bold text-gray-900 dark:text-white">{m.remarkName}</h4>
