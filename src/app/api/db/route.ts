@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase-admin";
 import { verifyUser } from "@/lib/auth-server";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, type Query } from "firebase-admin/firestore";
 
 export const runtime = "nodejs";
 
@@ -36,46 +36,51 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { action, collection, docId, data, where, orderBy, limit } = body;
 
-    let ref: any = adminDb.collection(collection);
-
     if (action === "query") {
+      const ref = adminDb.collection(collection);
+      let query: Query = ref;
       if (where) {
         where.forEach((w: any) => {
           // Resolve special variable 'user.uid'
           const val = w[2] === "user.uid" ? user.uid : w[2];
-          ref = ref.where(w[0], w[1], val);
+          query = query.where(w[0], w[1], val);
         });
       }
       if (orderBy) {
-        ref = ref.orderBy(orderBy[0], orderBy[1] || "asc");
+        query = query.orderBy(orderBy[0], orderBy[1] || "asc");
       }
       if (limit) {
-        ref = ref.limit(limit);
+        query = query.limit(limit);
       }
-      const snapshot = await ref.get();
+      const snapshot = await query.get();
       const docs = snapshot.docs.map((d: any) => serializeFirestore({ id: d.id, ...d.data() }));
       return NextResponse.json({ docs });
     } 
     else if (action === "get") {
+      const ref = adminDb.collection(collection);
       const docSnap = await ref.doc(docId).get();
       if (!docSnap.exists) return NextResponse.json({ doc: null });
       return NextResponse.json({ doc: serializeFirestore({ id: docSnap.id, ...docSnap.data() }) });
     }
     else if (action === "add") {
+      const ref = adminDb.collection(collection);
       const newRef = ref.doc();
       const payload = resolveSentinels({ ...data, createdAt: data?.createdAt || FieldValue.serverTimestamp() });
       await newRef.set(payload);
       return NextResponse.json({ id: newRef.id });
     }
     else if (action === "set") {
+      const ref = adminDb.collection(collection);
       await ref.doc(docId).set(resolveSentinels(data), { merge: body.merge !== false });
       return NextResponse.json({ success: true });
     }
     else if (action === "update") {
+      const ref = adminDb.collection(collection);
       await ref.doc(docId).update(resolveSentinels({ ...data, updatedAt: FieldValue.serverTimestamp() }));
       return NextResponse.json({ success: true });
     }
     else if (action === "delete") {
+      const ref = adminDb.collection(collection);
       await ref.doc(docId).delete();
       return NextResponse.json({ success: true });
     }

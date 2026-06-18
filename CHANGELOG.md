@@ -1,5 +1,14 @@
 # CountBottle (记瓶子) 版本记录
 
+## [V1.2.3] - 2026-06-18
+
+**Record action API fix**
+
+### Bug Fixes
+
+* Fix custom `/api/db` actions that do not use a Firestore collection path, including quick add and record submit.
+* Update the hidden runtime version marker to `1.2.3`.
+
 ## [V1.2.2] - 2026-06-18
 
 **Auth session cookie fix**
