@@ -1,36 +1,90 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 小聚记账 CountBottle
 
-## Getting Started
+小聚记账是一款面向熟人聚会、桌游娱乐、合租分摊、线下活动等场景的轻量 Web 记账工具。它不强调复杂财务流程，而是帮助小团体快速记录“谁还有多少瓶、多少次、多少分、多少账”，并通过群组、成员卡片、流水记录和分享机制，让现场记账更清楚、更省事。
 
-First, run the development server:
+线上地址：[https://countbottle-web.web.app/](https://countbottle-web.web.app/)
+
+## 产品特色
+
+- **群组式记账**：每个活动或小圈子都可以创建独立群组，单独维护成员、单位、公告和计息规则。
+- **成员卡片**：每位成员都有独立卡片，展示当前数量、身份状态和个人记录，适合现场快速查看。
+- **快速 +1**：常见场景下可以直接点击成员卡片旁的 `+1`，减少重复输入。
+- **完整流水**：每次增加、核销、调平、系统计息都会留下记录，方便事后核对。
+- **身份认领**：可以先创建未认领成员卡片，后续用户注册登录后再认领自己的身份。
+- **邀请分享**：支持复制群组邀请链接，方便成员通过链接进入并加入群组。
+- **计息规则**：支持单利、复利和不同周期的自动计息配置，适合需要“欠数递增”的场景。
+- **深色模式**：支持系统主题和手动切换，适合聚会、桌游等夜间环境使用。
+- **长图分享**：可将群组排行生成图片，便于在聊天群里分享。
+
+## 主要功能
+
+### 账号与个人资料
+
+- 邮箱密码注册与登录
+- 登录态保持
+- 个人昵称与头像资料维护
+
+### 群组管理
+
+- 创建群组
+- 加入已有群组
+- 设置计数单位，例如“瓶”“次”“分”“元”
+- 设置群公告
+- 配置计息方式、利率与周期
+- 解散群组
+
+### 成员与权限
+
+- 群主拥有完整管理权限
+- 管理员可协助记账、添加成员和维护成员信息
+- 普通成员可查看群组并记录自己的数量
+- 未认领成员支持后续绑定真实账号
+
+### 记账与流水
+
+- 快速增加 1
+- 手动增加数量
+- 管理员核销数量
+- 管理员强制调平
+- 查看成员流水
+- 查看群组汇总信息
+
+## 技术架构
+
+- 前端框架：Next.js App Router、React、Tailwind CSS
+- 动效：Framer Motion
+- 认证：Firebase Authentication
+- 数据：Cloud Firestore
+- 服务端接口：Next.js Route Handlers + Firebase Admin SDK
+- 托管：Firebase Hosting + Google Cloud Run
+
+当前关键链路已尽量收拢到同域服务端接口，减少浏览器直接访问 Google/Firebase 服务造成的访问不稳定。
+
+## 本地开发
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+访问本地地址：
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```text
+http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+构建检查：
 
-## Learn More
+```bash
+npm run build
+```
 
-To learn more about Next.js, take a look at the following resources:
+## 版本与变更记录
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- 对外版本记录维护在 `CHANGELOG.md`
+- 内部详细排查和修复记录维护在 `docs/internal-change-log.md`
+- 页面中包含隐藏版本标记，便于线上排查时确认当前部署版本
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 当前状态
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+项目已完成基础账号体系、群组、成员卡片、记账流水、邀请分享、计息配置、深色模式和线上部署。后续重点可以继续完善权限边界、移动端细节、头像上传链路和更完整的自动化测试。

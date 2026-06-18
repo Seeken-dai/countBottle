@@ -1,24 +1,32 @@
 # CountBottle (记瓶子) 版本记录
 
+## [V1.2.4] - 2026-06-18
+
+**权限校验优化**
+
+### 修复与优化
+
+* 优化群组记账相关操作的权限校验，提升多人协作时的数据安全性。
+* 更新线上版本标记至 `1.2.4`。
+
 ## [V1.2.3] - 2026-06-18
 
-**Record action API fix**
+**记账操作稳定性优化**
 
-### Bug Fixes
+### 修复与优化
 
-* Fix custom `/api/db` actions that do not use a Firestore collection path, including quick add and record submit.
-* Update the hidden runtime version marker to `1.2.3`.
+* 优化群组详情页的记账操作体验，提升快速记录与手动记账的稳定性。
+* 更新线上版本标记至 `1.2.3`。
 
 ## [V1.2.2] - 2026-06-18
 
-**Auth session cookie fix**
+**登录与访问稳定性优化**
 
-### Bug Fixes
+### 修复与优化
 
-* Rename the server auth cookie to `__session` so Firebase Hosting forwards it to the Cloud Run backend.
-* Stop returning Firebase `idToken` and `refreshToken` in the login/register API response body.
-* Remove the build-time dependency on Google Fonts by using system font stacks.
-* Update the hidden runtime version marker to `1.2.2`.
+* 优化登录态保持机制，改善登录后进入页面又回退的情况。
+* 优化资源加载策略，减少外部网络波动对访问体验的影响。
+* 更新线上版本标记至 `1.2.2`。
 
 ## \[V1.2.1] - 2026-06-17
 

@@ -28,6 +28,24 @@ async function isSuperAdmin(uid: string) {
   return snap.exists;
 }
 
+async function canManageGroup(groupId: string, uid: string) {
+  if (!groupId || !uid) return false;
+  if (await isSuperAdmin(uid)) return true;
+
+  const groupSnap = await adminDb.collection("Groups").doc(groupId).get();
+  const group = groupSnap.data();
+  if (group?.creatorId === uid || group?.createdBy === uid) return true;
+
+  const memberSnap = await adminDb
+    .collection("Members")
+    .where("groupId", "==", groupId)
+    .where("userId", "==", uid)
+    .limit(1)
+    .get();
+  const role = memberSnap.docs[0]?.data()?.role;
+  return role === "OWNER" || role === "ADMIN" || role === "SUB_ADMIN";
+}
+
 export async function POST(request: Request) {
   const user = await verifyUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -118,6 +136,13 @@ export async function POST(request: Request) {
     else if (action === "quickAddRecord") {
       const { memberId, groupId } = data || {};
       const memberRef = adminDb.collection("Members").doc(memberId);
+      const memberSnap = await memberRef.get();
+      if (!memberSnap.exists) return NextResponse.json({ error: "Member not found" }, { status: 404 });
+      const member = memberSnap.data();
+      if (member?.groupId !== groupId) return NextResponse.json({ error: "Invalid member group" }, { status: 400 });
+      const canOperate = member?.userId === user.uid || await canManageGroup(groupId, user.uid);
+      if (!canOperate) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
       const recordRef = adminDb.collection("Records").doc();
       await adminDb.runTransaction(async (transaction) => {
         transaction.update(memberRef, {
@@ -139,6 +164,19 @@ export async function POST(request: Request) {
     else if (action === "submitRecord") {
       const { memberId, groupId, recordActionType, amount } = data || {};
       const memberRef = adminDb.collection("Members").doc(memberId);
+      const memberSnap = await memberRef.get();
+      if (!memberSnap.exists) return NextResponse.json({ error: "Member not found" }, { status: 404 });
+      const member = memberSnap.data();
+      if (member?.groupId !== groupId) return NextResponse.json({ error: "Invalid member group" }, { status: 400 });
+      const isOwnRecord = member?.userId === user.uid;
+      const isManager = await canManageGroup(groupId, user.uid);
+      if (recordActionType === "ADD" && !isOwnRecord && !isManager) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      if ((recordActionType === "DEDUCT" || recordActionType === "SET") && !isManager) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+
       await adminDb.runTransaction(async (transaction) => {
         const memberDoc = await transaction.get(memberRef);
         if (!memberDoc.exists) throw new Error("成员不存在");
