@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { AUTH_COOKIE_NAME } from '@/lib/auth-cookie';
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (pathname.startsWith('/v1/projects/') || pathname.startsWith('/google.firestore.v1.Firestore/')) {
-    const session = request.cookies.get('session');
+    const session = request.cookies.get(AUTH_COOKIE_NAME);
     if (!session || !session.value) {
       return new NextResponse(
         JSON.stringify({ error: "Unauthorized Firestore Access" }),

@@ -1,24 +1,13 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider } from "@/lib/auth-context";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "小聚记账 (countBottle-web)",
   description: "专为熟人聚会、桌游娱乐等线下场景打造的 Web 端记录工具",
   other: {
-    "countbottle-version": "1.2.1",
+    "countbottle-version": "1.2.2",
   },
 };
 
@@ -31,8 +20,8 @@ export default function RootLayout({
     <html
       lang="zh-CN"
       suppressHydrationWarning
-      data-countbottle-version="1.2.1"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      data-countbottle-version="1.2.2"
+      className="h-full antialiased"
     >
       <body className="min-h-full flex flex-col">
         <ThemeProvider

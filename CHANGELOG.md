@@ -1,5 +1,16 @@
 # CountBottle (记瓶子) 版本记录
 
+## [V1.2.2] - 2026-06-18
+
+**Auth session cookie fix**
+
+### Bug Fixes
+
+* Rename the server auth cookie to `__session` so Firebase Hosting forwards it to the Cloud Run backend.
+* Stop returning Firebase `idToken` and `refreshToken` in the login/register API response body.
+* Remove the build-time dependency on Google Fonts by using system font stacks.
+* Update the hidden runtime version marker to `1.2.2`.
+
 ## \[V1.2.1] - 2026-06-17
 
 **🐛 登录与服务端代理修复**

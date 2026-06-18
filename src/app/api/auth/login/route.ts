@@ -1,16 +1,24 @@
 import { NextResponse } from "next/server";
 import { adminAuth } from "@/lib/firebase-admin";
+import { AUTH_COOKIE_NAME } from "@/lib/auth-cookie";
 
 export const runtime = "nodejs";
 
 const FIREBASE_API_KEY = "AIzaSyA8XsBNIYhQ7MM3eF7y9uSdWvNkzi5D-B4";
+
+type AuthResponseUser = {
+  localId: string;
+  email: string;
+  displayName: string | null;
+  registered: boolean;
+};
 
 export async function POST(request: Request) {
   try {
     const { email, password, idToken: providedIdToken } = await request.json();
 
     let idToken = providedIdToken;
-    let authData: any = null;
+    let authData: AuthResponseUser | null = null;
 
     if (!idToken) {
       // Fetch from Firebase Identity Toolkit REST API
@@ -24,7 +32,12 @@ export async function POST(request: Request) {
       if (!res.ok) {
         return NextResponse.json({ error: data.error.message }, { status: 401 });
       }
-      authData = data;
+      authData = {
+        localId: data.localId,
+        email: data.email,
+        displayName: data.displayName || null,
+        registered: data.registered,
+      };
       idToken = data.idToken;
     }
     
@@ -33,7 +46,7 @@ export async function POST(request: Request) {
     const sessionCookie = await adminAuth.createSessionCookie(idToken, { expiresIn });
 
     const response = NextResponse.json({ success: true, user: authData });
-    response.cookies.set("session", sessionCookie, {
+    response.cookies.set(AUTH_COOKIE_NAME, sessionCookie, {
       maxAge: expiresIn / 1000,
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -42,7 +55,7 @@ export async function POST(request: Request) {
     });
 
     return response;
-  } catch (error: any) {
+  } catch {
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

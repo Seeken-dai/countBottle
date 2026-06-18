@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { adminAuth } from "@/lib/firebase-admin";
+import { AUTH_COOKIE_NAME } from "@/lib/auth-cookie";
 
 export const runtime = "nodejs";
 
@@ -44,8 +45,16 @@ export async function POST(request: Request) {
       createdAt: new Date().toISOString()
     });
 
-    const response = NextResponse.json({ success: true, user: data });
-    response.cookies.set("session", sessionCookie, {
+    const response = NextResponse.json({
+      success: true,
+      user: {
+        localId: data.localId,
+        email: data.email,
+        displayName: data.displayName || null,
+        registered: true,
+      },
+    });
+    response.cookies.set(AUTH_COOKIE_NAME, sessionCookie, {
       maxAge: expiresIn / 1000,
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -54,7 +63,7 @@ export async function POST(request: Request) {
     });
 
     return response;
-  } catch (error: any) {
+  } catch {
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
