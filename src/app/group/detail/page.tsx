@@ -6,7 +6,6 @@ import { useAuth } from "@/lib/auth-context";
 import { getDocProxy, proxyRequest, queryProxy, updateDocProxy } from "@/lib/useFirestore";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Modal } from "@/components/ui/modal";
-import { AppFooter } from "@/components/app-footer";
 import Link from "next/link";
 import { motion, AnimatePresence, useSpring, useTransform } from "framer-motion";
 import { Suspense } from "react";
@@ -596,8 +595,6 @@ function GroupDetailsContent() {
           </AnimatePresence>
         </div>
       </main>
-
-      <AppFooter />
 
       <Modal isOpen={isAddMemberModalOpen} onClose={() => !isActionLoading && setIsAddMemberModalOpen(false)} title="添加新成员 (空白卡片)">
         <form onSubmit={handleAddMember} className="space-y-4">

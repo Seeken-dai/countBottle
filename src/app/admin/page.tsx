@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { proxyRequest, queryProxy } from "@/lib/useFirestore";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Modal } from "@/components/ui/modal";
-import { AppFooter } from "@/components/app-footer";
 
 interface UserData {
   uid: string;
@@ -302,8 +301,6 @@ export default function AdminPage() {
         )}
 
       </main>
-
-      <AppFooter />
 
       {/* Group Maintenance Modal */}
       <Modal isOpen={isGroupModalOpen} onClose={() => !isActionLoading && setIsGroupModalOpen(false)} title="群组高级维护" maxWidth="2xl">

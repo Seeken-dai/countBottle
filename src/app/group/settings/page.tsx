@@ -5,7 +5,6 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { getDocProxy, proxyRequest, queryProxy } from "@/lib/useFirestore";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { AppFooter } from "@/components/app-footer";
 import { Suspense } from "react";
 
 interface InterestConfig {
@@ -226,19 +225,29 @@ function GroupSettingsContent() {
       }
     }
 
+    const previewItems = [
+      { label: "初始", value: "10.00", isInitial: true },
+      ...balances.slice(1).map((balance, index) => ({
+        label: `第 ${index + 1} 期`,
+        value: balance.toFixed(2),
+        isInitial: false
+      }))
+    ];
+
     return (
       <div className="mt-4 bg-gray-50 dark:bg-gray-800/50 p-4 rounded-xl border border-gray-100 dark:border-gray-800">
         <h5 className="text-sm font-bold text-gray-900 dark:text-white mb-3">预览 (基于当前设置)</h5>
-        <div className="grid grid-cols-2 sm:grid-cols-7 gap-2 text-center text-xs">
-          <div className="font-bold text-gray-500">初始</div>
-          {[1, 2, 3, 4, 5, 6].map(i => <div key={i} className="font-bold text-gray-500">第 {i} 期</div>)}
-          
-          <div className="text-gray-900 dark:text-white font-mono">10.00</div>
-          {balances.slice(1).map((b, i) => (
-            <div key={i} className="text-primary font-mono font-bold">{b.toFixed(2)}</div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 text-center text-xs">
+          {previewItems.map(item => (
+            <div key={item.label} className="rounded-lg bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 px-2 py-3">
+              <div className="font-bold text-gray-500 mb-1">{item.label}</div>
+              <div className={`font-mono font-bold ${item.isInitial ? "text-gray-900 dark:text-white" : "text-primary"}`}>
+                {item.value}
+              </div>
+            </div>
           ))}
         </div>
-        <p className="text-[11px] text-gray-400 mt-3 text-center">注：推演结果仅供参考，实际计算将根据设定频率通过“懒加载”在用户访问时结算。</p>
+        <p className="text-[11px] text-gray-400 mt-3 text-center leading-relaxed">注：推演结果仅供参考，实际计算将根据设定频率在用户访问时结算。</p>
       </div>
     );
   };
@@ -467,7 +476,6 @@ function GroupSettingsContent() {
         </section>}
       </main>
 
-      <AppFooter />
     </div>
   );
 }

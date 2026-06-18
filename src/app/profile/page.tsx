@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { proxyRequest } from "@/lib/useFirestore";
-import { AppFooter } from "@/components/app-footer";
 
 function getInitial(name?: string | null, email?: string | null) {
   return (name || email?.split("@")[0] || "U").trim().charAt(0).toUpperCase();
@@ -118,7 +117,6 @@ export default function ProfilePage() {
         </div>
       </main>
 
-      <AppFooter />
     </div>
   );
 }

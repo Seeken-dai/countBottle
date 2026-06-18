@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Modal } from "@/components/ui/modal";
 
-const VERSION = "1.3.1";
+const VERSION = "1.3.2";
 
 const releaseNotes = [
   "首页新增版本入口，可查看当前版本更新内容。",
@@ -13,7 +13,8 @@ const releaseNotes = [
   "普通成员不再显示快捷 +1，仅保留查看能力。",
   "群组成员排序支持按账号记忆，并优化中文名称排序。",
   "超管后台群组列表新增创建人信息。",
-  "优化群组设置页的数据加载方式，改善部分群组进入设置页时持续加载的问题。"
+  "优化群组设置页的数据加载方式，改善部分群组进入设置页时持续加载的问题。",
+  "优化 Dashboard 版本与版权信息的展示位置。"
 ];
 
 export function AppFooter() {
