@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { proxyRequest, queryProxy } from "@/lib/useFirestore";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Modal } from "@/components/ui/modal";
+import { AppFooter } from "@/components/app-footer";
 
 interface UserData {
   uid: string;
@@ -220,9 +221,9 @@ export default function AdminPage() {
                 <thead className="bg-gray-50 dark:bg-gray-800/50 text-gray-500 dark:text-gray-400">
                   <tr>
                     <th className="px-6 py-3 font-medium">群组名称</th>
-                    <th className="px-6 py-3 font-medium">创建人</th>
                     <th className="px-6 py-3 font-medium">群组 ID</th>
                     <th className="px-6 py-3 font-medium">单位</th>
+                    <th className="px-6 py-3 font-medium">创建人</th>
                     <th className="px-6 py-3 font-medium">创建时间</th>
                     <th className="px-6 py-3 font-medium text-right">操作</th>
                   </tr>
@@ -231,9 +232,9 @@ export default function AdminPage() {
                   {groups.map(group => (
                     <tr key={group.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
                       <td className="px-6 py-4 font-bold text-gray-900 dark:text-white">{group.name}</td>
-                      <td className="px-6 py-4 text-gray-600 dark:text-gray-300">{group.creatorName || group.creatorId || "-"}</td>
                       <td className="px-6 py-4 text-gray-500 font-mono text-xs">{group.id}</td>
                       <td className="px-6 py-4 text-gray-500">{group.unit}</td>
+                      <td className="px-6 py-4 text-gray-600 dark:text-gray-300">{group.creatorName || group.creatorId || "-"}</td>
                       <td className="px-6 py-4 text-gray-500">
                         {group.createdAt ? new Date(group.createdAt).toLocaleString() : "-"}
                       </td>
@@ -301,6 +302,8 @@ export default function AdminPage() {
         )}
 
       </main>
+
+      <AppFooter />
 
       {/* Group Maintenance Modal */}
       <Modal isOpen={isGroupModalOpen} onClose={() => !isActionLoading && setIsGroupModalOpen(false)} title="群组高级维护" maxWidth="2xl">

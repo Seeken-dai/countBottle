@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { getDocProxy, proxyRequest, queryProxy } from "@/lib/useFirestore";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { AppFooter } from "@/components/app-footer";
 import { Suspense } from "react";
 
 interface InterestConfig {
@@ -42,6 +43,15 @@ interface AuditLog {
 }
 
 type AuditFilter = "ALL" | "MEMBER" | "BALANCE" | "CLAIM" | "SETTINGS";
+
+function getTimeValue(value: any) {
+  if (!value) return 0;
+  if (typeof value === "string") return new Date(value).getTime();
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.seconds === "number") return value.seconds * 1000;
+  if (typeof value._seconds === "number") return value._seconds * 1000;
+  return 0;
+}
 
 function GroupSettingsContent() {
   const searchParams = useSearchParams();
@@ -95,10 +105,12 @@ function GroupSettingsContent() {
         }
 
         setMembers(fetchedMembers);
-        const fetchedClaims = await queryProxy("ClaimRequests", [["groupId", "==", groupId], ["status", "==", "PENDING"]], ["createdAt", "desc"]) as ClaimRequest[];
+        const fetchedClaims = await queryProxy("ClaimRequests", [["groupId", "==", groupId], ["status", "==", "PENDING"]]) as ClaimRequest[];
+        fetchedClaims.sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
         setClaimRequests(fetchedClaims);
-        const fetchedLogs = await queryProxy("AuditLogs", [["groupId", "==", groupId]], ["createdAt", "desc"], 80) as AuditLog[];
-        setAuditLogs(fetchedLogs);
+        const fetchedLogs = await queryProxy("AuditLogs", [["groupId", "==", groupId]]) as AuditLog[];
+        fetchedLogs.sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
+        setAuditLogs(fetchedLogs.slice(0, 80));
       } else {
         router.push("/dashboard");
       }
@@ -177,8 +189,9 @@ function GroupSettingsContent() {
       setClaimRequests(prev => prev.filter(item => item.id !== request.id));
       const fetchedMembers = await queryProxy("Members", [["groupId", "==", groupId]]) as MemberData[];
       setMembers(fetchedMembers);
-      const fetchedLogs = await queryProxy("AuditLogs", [["groupId", "==", groupId]], ["createdAt", "desc"], 80) as AuditLog[];
-      setAuditLogs(fetchedLogs);
+      const fetchedLogs = await queryProxy("AuditLogs", [["groupId", "==", groupId]]) as AuditLog[];
+      fetchedLogs.sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
+      setAuditLogs(fetchedLogs.slice(0, 80));
     } catch (err: any) {
       alert(err.message || "审核失败");
     } finally {
@@ -453,6 +466,8 @@ function GroupSettingsContent() {
           </div>
         </section>}
       </main>
+
+      <AppFooter />
     </div>
   );
 }

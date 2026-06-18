@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth-context";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useRouter } from "next/navigation";
 import { Modal } from "@/components/ui/modal";
+import { AppFooter } from "@/components/app-footer";
 import Link from "next/link";
 import useSWR from 'swr';
 
@@ -211,6 +212,8 @@ export default function DashboardPage() {
           </div>
         )}
       </main>
+
+      <AppFooter />
 
       <Modal
         isOpen={isCreateModalOpen}

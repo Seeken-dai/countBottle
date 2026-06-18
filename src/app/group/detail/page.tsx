@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 import { getDocProxy, proxyRequest, queryProxy, updateDocProxy } from "@/lib/useFirestore";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Modal } from "@/components/ui/modal";
+import { AppFooter } from "@/components/app-footer";
 import Link from "next/link";
 import { motion, AnimatePresence, useSpring, useTransform } from "framer-motion";
 import { Suspense } from "react";
@@ -596,6 +597,8 @@ function GroupDetailsContent() {
         </div>
       </main>
 
+      <AppFooter />
+
       <Modal isOpen={isAddMemberModalOpen} onClose={() => !isActionLoading && setIsAddMemberModalOpen(false)} title="添加新成员 (空白卡片)">
         <form onSubmit={handleAddMember} className="space-y-4">
           <div>
@@ -629,9 +632,9 @@ function GroupDetailsContent() {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-3">
                   <input type="number" required min={0} value={recordAmount} onChange={(e) => setRecordAmount(e.target.value)} placeholder="输入数量" className="w-full min-w-0 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-2 focus:ring-primary text-base" />
-                  <button type="submit" disabled={isActionLoading || !recordAmount} className="w-full sm:w-auto min-h-11 px-6 rounded-xl font-bold text-white bg-primary disabled:opacity-50">提交</button>
                 </div>
                 <textarea value={recordNote} onChange={(e) => setRecordNote(e.target.value)} maxLength={200} rows={2} placeholder="备注（可选）" className="w-full min-w-0 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-2 focus:ring-primary text-base resize-none" />
+                <button type="submit" disabled={isActionLoading || !recordAmount} className="w-full min-h-11 px-6 rounded-xl font-bold text-white bg-primary disabled:opacity-50">提交</button>
               </form>
             )}
 
@@ -667,10 +670,12 @@ function GroupDetailsContent() {
                 
                 <div className="mb-4">
                   <form onSubmit={handleEditRemarkName} className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-3">
-                    <input type="text" value={editRemarkName} onChange={e => setEditRemarkName(e.target.value)} className="w-full min-w-0 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-1 focus:ring-primary text-base sm:text-sm" placeholder="修改备注名" />
+                    <div className="min-w-0">
+                      <input type="text" value={editRemarkName} onChange={e => setEditRemarkName(e.target.value)} className="w-full min-w-0 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-1 focus:ring-primary text-base sm:text-sm" placeholder="修改备注名" />
+                      <p className="text-[11px] text-gray-400 mt-1 ml-1">修改该成员的昵称</p>
+                    </div>
                     <button type="submit" disabled={isActionLoading || !editRemarkName} className="w-full sm:w-auto min-h-10 px-4 text-sm font-bold bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded-lg whitespace-nowrap">保存</button>
                   </form>
-                  <p className="text-[11px] text-gray-400 mt-1 ml-1">修改该成员的昵称</p>
                 </div>
               </div>
             )}
