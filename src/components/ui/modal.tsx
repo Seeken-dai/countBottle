@@ -48,7 +48,7 @@ export function Modal({ isOpen, onClose, title, children, maxWidth = "md" }: Mod
               leaveTo="opacity-0 scale-95"
             >
               <Dialog.Panel
-                className={`w-full ${maxWidthClass} transform overflow-hidden rounded-2xl bg-white dark:bg-gray-900 p-6 text-left align-middle shadow-2xl transition-all border border-gray-100 dark:border-gray-800`}
+                className={`w-full ${maxWidthClass} transform overflow-hidden rounded-2xl bg-white dark:bg-gray-900 p-4 sm:p-6 text-left align-middle shadow-2xl transition-all border border-gray-100 dark:border-gray-800`}
               >
                 <div className="flex items-center justify-between mb-5">
                   <Dialog.Title

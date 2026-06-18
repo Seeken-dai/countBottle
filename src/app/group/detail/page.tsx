@@ -551,15 +551,15 @@ function GroupDetailsContent() {
             </div>
 
             {(isAdmin || selectedMember.userId === user?.uid) && (
-              <form onSubmit={handleRecordSubmit} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-4 rounded-2xl shadow-sm space-y-4">
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => setRecordActionType("ADD")} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${recordActionType === "ADD" ? "bg-primary text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>记一笔 (+)</button>
-                  {isAdmin && <button type="button" onClick={() => setRecordActionType("DEDUCT")} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${recordActionType === "DEDUCT" ? "bg-orange-500 text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>核销 (-)</button>}
-                  {isAdmin && <button type="button" onClick={() => setRecordActionType("SET")} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${recordActionType === "SET" ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>强制调平 (=)</button>}
+              <form onSubmit={handleRecordSubmit} className="min-w-0 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-4 rounded-2xl shadow-sm space-y-4">
+                <div className="grid grid-cols-3 gap-2">
+                  <button type="button" onClick={() => setRecordActionType("ADD")} className={`min-w-0 px-2 py-2 text-xs sm:text-sm leading-tight font-bold rounded-lg transition-colors ${recordActionType === "ADD" ? "bg-primary text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>记一笔 (+)</button>
+                  {isAdmin && <button type="button" onClick={() => setRecordActionType("DEDUCT")} className={`min-w-0 px-2 py-2 text-xs sm:text-sm leading-tight font-bold rounded-lg transition-colors ${recordActionType === "DEDUCT" ? "bg-orange-500 text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>核销 (-)</button>}
+                  {isAdmin && <button type="button" onClick={() => setRecordActionType("SET")} className={`min-w-0 px-2 py-2 text-xs sm:text-sm leading-tight font-bold rounded-lg transition-colors ${recordActionType === "SET" ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>强制调平 (=)</button>}
                 </div>
-                <div className="flex gap-3">
-                  <input type="number" required min={0} value={recordAmount} onChange={(e) => setRecordAmount(e.target.value)} placeholder="输入数量" className="flex-1 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-2 focus:ring-primary" />
-                  <button type="submit" disabled={isActionLoading || !recordAmount} className="px-6 rounded-xl font-bold text-white bg-primary disabled:opacity-50">提交</button>
+                <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-3">
+                  <input type="number" required min={0} value={recordAmount} onChange={(e) => setRecordAmount(e.target.value)} placeholder="输入数量" className="w-full min-w-0 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-2 focus:ring-primary" />
+                  <button type="submit" disabled={isActionLoading || !recordAmount} className="w-full sm:w-auto min-h-11 px-6 rounded-xl font-bold text-white bg-primary disabled:opacity-50">提交</button>
                 </div>
               </form>
             )}
@@ -594,9 +594,9 @@ function GroupDetailsContent() {
                 <p className="text-xs text-gray-500 mb-4">群主及子管理员可用。</p>
                 
                 <div className="mb-4">
-                  <form onSubmit={handleEditRemarkName} className="flex gap-3">
-                    <input type="text" value={editRemarkName} onChange={e => setEditRemarkName(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-1 focus:ring-primary text-sm" placeholder="修改备注名" />
-                    <button type="submit" disabled={isActionLoading || !editRemarkName} className="px-4 text-sm font-bold bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded-lg">保存</button>
+                  <form onSubmit={handleEditRemarkName} className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-3">
+                    <input type="text" value={editRemarkName} onChange={e => setEditRemarkName(e.target.value)} className="w-full min-w-0 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-1 focus:ring-primary text-sm" placeholder="修改备注名" />
+                    <button type="submit" disabled={isActionLoading || !editRemarkName} className="w-full sm:w-auto min-h-10 px-4 text-sm font-bold bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded-lg whitespace-nowrap">保存</button>
                   </form>
                   <p className="text-[11px] text-gray-400 mt-1 ml-1">修改该卡片的对外展示名称</p>
                 </div>
@@ -608,12 +608,12 @@ function GroupDetailsContent() {
                 <h5 className="font-bold text-gray-900 dark:text-white mb-2">群主危险操作</h5>
                 <p className="text-xs text-gray-500 mb-4">以下操作仅群主可见。修改将立刻生效，请谨慎操作。</p>
                 
-                <div className="flex gap-3">
-                  <div className="flex-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="min-w-0">
                     <button onClick={handleUnbind} disabled={!selectedMember.userId} className="w-full py-2.5 text-sm font-bold bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg disabled:opacity-50 transition-colors">强制解绑账号</button>
                     <p className="text-[11px] text-gray-400 mt-1.5 leading-tight">将卡片恢复为“未认领”状态。过往账目保留。</p>
                   </div>
-                  <div className="flex-1">
+                  <div className="min-w-0">
                     <button onClick={handleDeleteMember} className="w-full py-2.5 text-sm font-bold bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-900/20 dark:hover:bg-red-900/40 rounded-lg transition-colors">彻底删除成员</button>
                     <p className="text-[11px] text-red-400/80 mt-1.5 leading-tight">永久销毁该卡片。相关流水记录将变成无主数据。</p>
                   </div>
