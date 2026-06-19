@@ -12,6 +12,7 @@ interface InterestConfig {
   fixedAmount?: number | string;
   type: "none" | "simple" | "compound" | "fixed";
   frequency: "none" | "daily" | "weekly" | "monthly" | "yearly";
+  nextInterestAt?: unknown;
   lastCalculatedAt?: any;
 }
 
@@ -109,6 +110,12 @@ function toIsoFromDateTimeLocal(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toISOString();
+}
+
+function getCurrentMinuteValue() {
+  const now = new Date();
+  now.setSeconds(0, 0);
+  return formatDateTimeLocal(now.toISOString());
 }
 
 function formatAuditTime(value: any) {
@@ -257,7 +264,7 @@ function GroupSettingsContent() {
         setRequireClaimApproval(!!data.requireClaimApproval);
         if (data.interestConfig) {
           setInterestConfig(data.interestConfig);
-          setInterestStartAt(formatDateTimeLocal(data.interestConfig.lastCalculatedAt));
+          setInterestStartAt(formatDateTimeLocal(data.interestConfig.nextInterestAt));
         }
 
         setMembers(fetchedMembers);
@@ -289,26 +296,28 @@ function GroupSettingsContent() {
 
   const handleSaveInterest = async (e: React.FormEvent) => {
     e.preventDefault();
+    const isEnabled = interestConfig.type !== "none" && interestConfig.frequency !== "none";
+    const nextInterestAt = isEnabled ? toIsoFromDateTimeLocal(interestStartAt) : null;
+    const currentMinute = new Date();
+    currentMinute.setSeconds(0, 0);
+    if (isEnabled && (!nextInterestAt || new Date(nextInterestAt).getTime() < currentMinute.getTime())) {
+      alert("下一次计息时间必须设置为当前或未来时间");
+      return;
+    }
     setIsSaving(true);
     try {
-      const nextLastCalculatedAt = interestConfig.type === "none"
-        ? null
-        : isCreator && interestStartAt
-          ? toIsoFromDateTimeLocal(interestStartAt)
-          : interestConfig.lastCalculatedAt || { __serverTimestamp: true };
       await proxyRequest({ action: "updateGroupInterest", data: { groupId,
         interestConfig: {
           ...interestConfig,
           rate: Number(interestConfig.rate) || 0,
           fixedAmount: Number(interestConfig.fixedAmount) || 0,
-          lastCalculatedAt: nextLastCalculatedAt
+          nextInterestAt,
+          lastCalculatedAt: null
         }
       }});
-      if (typeof nextLastCalculatedAt === "string") {
-        setInterestConfig(prev => ({ ...prev, lastCalculatedAt: nextLastCalculatedAt }));
-      }
+      setInterestConfig(prev => ({ ...prev, nextInterestAt, lastCalculatedAt: null }));
       alert("计息设置已保存");
-    } catch (err) { alert("保存失败"); }
+    } catch (err: unknown) { alert(err instanceof Error ? err.message : "保存失败"); }
     finally { setIsSaving(false); }
   };
 
@@ -382,14 +391,17 @@ function GroupSettingsContent() {
       return <p className="text-sm text-gray-500">当前未开启计息，或参数未配置完整。</p>;
     }
 
-    let balances = [10];
+    const balances = [10];
     const rate = (Number(interestConfig.rate) || 0) / 100;
     const fixedAmount = Number(interestConfig.fixedAmount) || 0;
     const frequencyMs = getFrequencyMs(interestConfig.frequency);
-    const baseTime = getTimeValue(interestStartAt || interestConfig.lastCalculatedAt) || Date.now();
+    const baseTime = getTimeValue(interestStartAt || interestConfig.nextInterestAt);
+    if (!baseTime) {
+      return <p className="text-sm text-gray-500">请先设置下一次计息时间。</p>;
+    }
     
     for (let i = 1; i <= 6; i++) {
-      let prev = balances[i-1];
+      const prev = balances[i-1];
       if (interestConfig.type === "fixed") {
         balances.push(prev + fixedAmount);
       } else if (interestConfig.type === "simple") {
@@ -402,10 +414,10 @@ function GroupSettingsContent() {
     }
 
     const previewItems = [
-      { label: "初始", value: "10.00", date: formatDateOnly(new Date(baseTime)), isInitial: true },
+      { label: "初始", value: "10.00", date: "-", isInitial: true },
       ...balances.slice(1).map((balance, index) => ({
         label: `第${index + 1}期`,
-        date: frequencyMs ? formatDateOnly(new Date(baseTime + frequencyMs * (index + 1))) : "-",
+        date: frequencyMs ? formatDateOnly(new Date(baseTime + frequencyMs * index)) : "-",
         value: balance.toFixed(2),
         isInitial: false
       }))
@@ -678,16 +690,18 @@ function GroupSettingsContent() {
 
             {isCreator && (
               <div className="rounded-2xl border border-amber-100 dark:border-amber-900/30 bg-amber-50/60 dark:bg-amber-900/10 p-4">
-                <label className="block text-sm font-bold text-gray-900 dark:text-white mb-1">计息基准时间</label>
+                <label className="block text-sm font-bold text-gray-900 dark:text-white mb-1">下一次计息时间</label>
                 <input
                   type="datetime-local"
                   value={interestStartAt}
                   onChange={e => setInterestStartAt(e.target.value)}
-                  disabled={interestConfig.type === "none"}
+                  min={getCurrentMinuteValue()}
+                  required={interestConfig.type !== "none" && interestConfig.frequency !== "none"}
+                  disabled={interestConfig.type === "none" || interestConfig.frequency === "none"}
                   className="w-full px-4 py-3 rounded-xl border border-amber-200 dark:border-amber-900/40 bg-white dark:bg-gray-950 focus:ring-2 focus:ring-primary outline-none transition-all disabled:opacity-50"
                 />
                 <p className="text-xs text-amber-700/80 dark:text-amber-300/80 mt-2 leading-relaxed">
-                  系统会从该时间开始累计完整周期，到达下一周期时触发结息；调整后不会回滚已生成的历史利息流水。
+                  到达该时间后，系统会在下次访问群组时结息；若错过多个周期，将一次性补算。调整不会影响历史利息流水。
                 </p>
               </div>
             )}

@@ -32,6 +32,7 @@ interface Group {
     fixedAmount?: number;
     type: "none" | "simple" | "compound" | "fixed";
     frequency: "none" | "daily" | "weekly" | "monthly" | "yearly";
+    nextInterestAt?: unknown;
     lastCalculatedAt?: any;
   };
   announcement?: string;
@@ -122,7 +123,7 @@ function GroupDetailsContent() {
 
   // LAZY EVALUATION FOR INTEREST
   const triggerLazyInterest = async (groupData: Group) => {
-    if (!groupData.interestConfig || groupData.interestConfig.type === "none" || groupData.interestConfig.frequency === "none" || !groupData.interestConfig.lastCalculatedAt) {
+    if (!groupData.interestConfig || groupData.interestConfig.type === "none" || groupData.interestConfig.frequency === "none" || !groupData.interestConfig.nextInterestAt) {
       return;
     }
     try {
