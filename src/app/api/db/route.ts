@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase-admin";
 import { verifyUser } from "@/lib/auth-server";
 import { FieldValue, type Query } from "firebase-admin/firestore";
+import { getDueInterestSchedule, normalizeInterestScheduleAnchor, type InterestFrequency } from "@/lib/interest-schedule";
 
 export const runtime = "nodejs";
 
@@ -36,16 +37,6 @@ function parseFirestoreDate(value: unknown) {
     return null;
   }
   return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function getInterestPeriodMs(frequency: string) {
-  const periods: Record<string, number> = {
-    daily: 86400000,
-    weekly: 604800000,
-    monthly: 2592000000,
-    yearly: 31536000000
-  };
-  return periods[frequency] || 0;
 }
 
 async function isSuperAdmin(uid: string) {
@@ -330,12 +321,16 @@ export async function POST(request: Request) {
       if (isEnabled && (!nextInterestDate || nextInterestDate.getTime() < currentMinute.getTime())) {
         return NextResponse.json({ error: "下一次计息时间必须设置为当前或未来时间" }, { status: 400 });
       }
+      const scheduleAnchor = nextInterestDate
+        ? normalizeInterestScheduleAnchor(interestConfig?.scheduleAnchor, nextInterestDate)
+        : null;
       const nextConfig = resolveSentinels({
         ...interestConfig,
         rate: Number(interestConfig?.rate) || 0,
         fixedAmount: Number(interestConfig?.fixedAmount) || 0,
         nextInterestAt: nextInterestDate ? nextInterestDate.toISOString() : null,
-        lastCalculatedAt: null
+        lastCalculatedAt: null,
+        scheduleAnchor
       });
       await adminDb.collection("Groups").doc(groupId).update({
         interestConfig: nextConfig,
@@ -348,7 +343,7 @@ export async function POST(request: Request) {
         targetType: "group",
         targetId: groupId,
         summary: "更新计息规则",
-        metadata: { type: interestConfig?.type, frequency: interestConfig?.frequency, rate: Number(interestConfig?.rate) || 0, fixedAmount: Number(interestConfig?.fixedAmount) || 0, nextInterestAt: nextInterestDate?.toISOString() || null },
+        metadata: { type: interestConfig?.type, frequency: interestConfig?.frequency, rate: Number(interestConfig?.rate) || 0, fixedAmount: Number(interestConfig?.fixedAmount) || 0, nextInterestAt: nextInterestDate?.toISOString() || null, scheduleAnchor },
         actorName,
         displayTitle: `${actorName}更新了计息规则`,
         displayDetail: `类型：${interestConfig?.type || "none"}；频率：${interestConfig?.frequency || "none"}；利率：${Number(interestConfig?.rate) || 0}%；固定数量：${Number(interestConfig?.fixedAmount) || 0}`
@@ -736,15 +731,15 @@ export async function POST(request: Request) {
 
         const nextInterestDate = parseFirestoreDate(freshConfig.nextInterestAt);
         if (!nextInterestDate || now.getTime() < nextInterestDate.getTime()) return;
-        const freq = freshConfig.frequency as "daily" | "weekly" | "monthly" | "yearly";
-        const msPerPeriod = getInterestPeriodMs(freq);
-        if (!msPerPeriod) return;
-        const freshPeriods = 1 + Math.floor((now.getTime() - nextInterestDate.getTime()) / msPerPeriod);
+        const freq = freshConfig.frequency as InterestFrequency;
+        const schedule = getDueInterestSchedule(nextInterestDate, now, freq, freshConfig.scheduleAnchor);
+        if (!schedule) return;
+        const freshPeriods = schedule.periods;
         appliedPeriods = freshPeriods;
         appliedFromIso = nextInterestDate.toISOString();
 
-        const lastCalculatedTime = new Date(nextInterestDate.getTime() + (freshPeriods - 1) * msPerPeriod);
-        const newNextInterestTime = new Date(nextInterestDate.getTime() + freshPeriods * msPerPeriod);
+        const lastCalculatedTime = schedule.lastDueAt;
+        const newNextInterestTime = schedule.nextDueAt;
         appliedToIso = lastCalculatedTime.toISOString();
         nextInterestIso = newNextInterestTime.toISOString();
 

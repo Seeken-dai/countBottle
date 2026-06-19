@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 import { getDocProxy, proxyRequest, queryProxy } from "@/lib/useFirestore";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Suspense } from "react";
+import { addInterestPeriods, createInterestScheduleAnchor, type InterestScheduleAnchor } from "@/lib/interest-schedule";
 
 interface InterestConfig {
   rate: number | string;
@@ -14,6 +15,7 @@ interface InterestConfig {
   frequency: "none" | "daily" | "weekly" | "monthly" | "yearly";
   nextInterestAt?: unknown;
   lastCalculatedAt?: any;
+  scheduleAnchor?: InterestScheduleAnchor | null;
 }
 
 interface MemberData {
@@ -93,16 +95,6 @@ function formatDateTimeLocal(value: any) {
 function formatDateOnly(value: Date) {
   const pad = (num: number) => String(num).padStart(2, "0");
   return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
-}
-
-function getFrequencyMs(frequency: InterestConfig["frequency"]) {
-  return {
-    none: 0,
-    daily: 86400000,
-    weekly: 604800000,
-    monthly: 2592000000,
-    yearly: 31536000000
-  }[frequency] || 0;
 }
 
 function toIsoFromDateTimeLocal(value: string) {
@@ -298,6 +290,10 @@ function GroupSettingsContent() {
     e.preventDefault();
     const isEnabled = interestConfig.type !== "none" && interestConfig.frequency !== "none";
     const nextInterestAt = isEnabled ? toIsoFromDateTimeLocal(interestStartAt) : null;
+    const selectedInterestDate = nextInterestAt ? new Date(nextInterestAt) : null;
+    const scheduleAnchor = isEnabled && selectedInterestDate
+      ? interestConfig.scheduleAnchor || createInterestScheduleAnchor(new Date(interestStartAt))
+      : null;
     const currentMinute = new Date();
     currentMinute.setSeconds(0, 0);
     if (isEnabled && (!nextInterestAt || new Date(nextInterestAt).getTime() < currentMinute.getTime())) {
@@ -312,10 +308,11 @@ function GroupSettingsContent() {
           rate: Number(interestConfig.rate) || 0,
           fixedAmount: Number(interestConfig.fixedAmount) || 0,
           nextInterestAt,
-          lastCalculatedAt: null
+          lastCalculatedAt: null,
+          scheduleAnchor
         }
       }});
-      setInterestConfig(prev => ({ ...prev, nextInterestAt, lastCalculatedAt: null }));
+      setInterestConfig(prev => ({ ...prev, nextInterestAt, lastCalculatedAt: null, scheduleAnchor }));
       alert("计息设置已保存");
     } catch (err: unknown) { alert(err instanceof Error ? err.message : "保存失败"); }
     finally { setIsSaving(false); }
@@ -394,7 +391,6 @@ function GroupSettingsContent() {
     const balances = [10];
     const rate = (Number(interestConfig.rate) || 0) / 100;
     const fixedAmount = Number(interestConfig.fixedAmount) || 0;
-    const frequencyMs = getFrequencyMs(interestConfig.frequency);
     const baseTime = getTimeValue(interestStartAt || interestConfig.nextInterestAt);
     if (!baseTime) {
       return <p className="text-sm text-gray-500">请先设置下一次计息时间。</p>;
@@ -417,7 +413,12 @@ function GroupSettingsContent() {
       { label: "初始", value: "10.00", date: "-", isInitial: true },
       ...balances.slice(1).map((balance, index) => ({
         label: `第${index + 1}期`,
-        date: frequencyMs ? formatDateOnly(new Date(baseTime + frequencyMs * index)) : "-",
+        date: formatDateOnly(addInterestPeriods(
+          new Date(baseTime),
+          interestConfig.frequency as Exclude<InterestConfig["frequency"], "none">,
+          index,
+          interestConfig.scheduleAnchor || createInterestScheduleAnchor(new Date(baseTime))
+        )),
         value: balance.toFixed(2),
         isInitial: false
       }))
@@ -694,7 +695,13 @@ function GroupSettingsContent() {
                 <input
                   type="datetime-local"
                   value={interestStartAt}
-                  onChange={e => setInterestStartAt(e.target.value)}
+                  onChange={e => {
+                    setInterestStartAt(e.target.value);
+                    const selectedDate = new Date(e.target.value);
+                    if (!Number.isNaN(selectedDate.getTime())) {
+                      setInterestConfig(prev => ({ ...prev, scheduleAnchor: createInterestScheduleAnchor(selectedDate) }));
+                    }
+                  }}
                   min={getCurrentMinuteValue()}
                   required={interestConfig.type !== "none" && interestConfig.frequency !== "none"}
                   disabled={interestConfig.type === "none" || interestConfig.frequency === "none"}
