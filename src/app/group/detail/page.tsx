@@ -29,7 +29,8 @@ interface Group {
   requireClaimApproval?: boolean;
   interestConfig?: {
     rate: number;
-    type: "none" | "simple" | "compound";
+    fixedAmount?: number;
+    type: "none" | "simple" | "compound" | "fixed";
     frequency: "none" | "daily" | "weekly" | "monthly" | "yearly";
     lastCalculatedAt?: any;
   };
@@ -48,7 +49,7 @@ interface Member {
   photoURL?: string;
 }
 
-interface Record {
+interface LedgerRecord {
   id: string;
   memberId: string;
   operatorId: string;
@@ -109,13 +110,15 @@ function GroupDetailsContent() {
 
   const selectedMember = activeMember;
   
-  const [memberRecords, setMemberRecords] = useState<Record[]>([]);
-  const [groupRecords, setGroupRecords] = useState<Record[]>([]);
+  const [memberRecords, setMemberRecords] = useState<LedgerRecord[]>([]);
+  const [groupRecords, setGroupRecords] = useState<LedgerRecord[]>([]);
   const [recordActionType, setRecordActionType] = useState<"ADD" | "DEDUCT" | "SET">("ADD");
   const [recordAmount, setRecordAmount] = useState<string>("");
   const [recordNote, setRecordNote] = useState<string>("");
   const [editRemarkName, setEditRemarkName] = useState("");
   const [pendingClaimMemberIds, setPendingClaimMemberIds] = useState<Set<string>>(new Set());
+  const [pendingReviewCount, setPendingReviewCount] = useState(0);
+  const [recordOperatorNames, setRecordOperatorNames] = useState<Record<string, string>>({});
 
   // LAZY EVALUATION FOR INTEREST
   const triggerLazyInterest = async (groupData: Group) => {
@@ -161,7 +164,7 @@ function GroupDetailsContent() {
     };
 
     const fetchRecords = async () => {
-      const recs = await queryProxy("Records", [["groupId", "==", groupId]]) as Record[];
+      const recs = await queryProxy("Records", [["groupId", "==", groupId]]) as LedgerRecord[];
       if (cancelled) return;
       setGroupRecords(recs);
     };
@@ -219,9 +222,18 @@ function GroupDetailsContent() {
     }
     let cancelled = false;
     const fetchMemberRecords = async () => {
-      const recs = await queryProxy("Records", [["memberId", "==", selectedMemberId]]) as Record[];
+      const recs = await queryProxy("Records", [["memberId", "==", selectedMemberId]]) as LedgerRecord[];
       recs.sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
-      if (!cancelled) setMemberRecords(recs);
+      const operatorIds = Array.from(new Set(recs.map(record => record.operatorId).filter(id => id && id !== "SYSTEM")));
+      const operatorEntries = await Promise.all(operatorIds.map(async (operatorId) => {
+        const operator = await getDocProxy("Users", operatorId);
+        const displayName = operator?.displayName || operator?.email?.split("@")[0] || "未知用户";
+        return [operatorId, displayName] as const;
+      }));
+      if (!cancelled) {
+        setMemberRecords(recs);
+        setRecordOperatorNames(Object.fromEntries(operatorEntries));
+      }
     };
     fetchMemberRecords();
     const interval = window.setInterval(fetchMemberRecords, 5000);
@@ -236,6 +248,32 @@ function GroupDetailsContent() {
   const isSubAdmin = currentUserMember?.role === "SUB_ADMIN" || currentUserMember?.role === "ADMIN" || currentUserMember?.role === "OWNER";
   const isAdmin = isCreator || isSubAdmin;
   const hasClaimed = !!currentUserMember;
+
+  useEffect(() => {
+    if (!isAdmin || !groupId) {
+      setPendingReviewCount(0);
+      return;
+    }
+    let cancelled = false;
+
+    const fetchPendingReviews = async () => {
+      const claims = await queryProxy("ClaimRequests", [["groupId", "==", groupId], ["status", "==", "PENDING"]]) as ClaimRequest[];
+      if (!cancelled) setPendingReviewCount(claims.length);
+    };
+
+    fetchPendingReviews();
+    const interval = window.setInterval(fetchPendingReviews, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [groupId, isAdmin]);
+
+  const getRecordOperatorLabel = (record: LedgerRecord) => {
+    if (record.operatorId === "SYSTEM") return "系统自动计息";
+    if (record.operatorId === user?.uid) return user.displayName || user.email?.split("@")[0] || "我";
+    return recordOperatorNames[record.operatorId] || "未知用户";
+  };
 
   const remainingTotal = members.reduce((sum, m) => sum + m.balance, 0);
   
@@ -430,8 +468,16 @@ function GroupDetailsContent() {
           </div>
           <div className="flex items-center gap-3">
             {isAdmin && (
-              <Link href={`/group/settings?id=${groupId}`} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors" aria-label="Settings">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+              <Link href={`/group/settings?id=${groupId}`} className="relative inline-flex items-center gap-2 rounded-full px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors" aria-label={pendingReviewCount > 0 ? `有 ${pendingReviewCount} 个认领申请待处理` : "Settings"}>
+                {pendingReviewCount > 0 && (
+                  <span className="hidden sm:inline-flex rounded-full bg-red-50 dark:bg-red-900/20 px-2 py-0.5 text-xs font-bold text-red-600 dark:text-red-300">
+                    待处理 {pendingReviewCount}
+                  </span>
+                )}
+                <span className="relative">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                  {pendingReviewCount > 0 && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />}
+                </span>
               </Link>
             )}
             <ThemeToggle />
@@ -508,7 +554,11 @@ function GroupDetailsContent() {
                   计息：
                   {!group.interestConfig || group.interestConfig.type === 'none' || group.interestConfig.frequency === 'none'
                     ? "未开启" 
-                    : `${group.interestConfig.type === 'simple' ? '单利' : '复利'} · ${group.interestConfig.rate}% / ${
+                    : group.interestConfig.type === 'fixed'
+                      ? `固定 +${group.interestConfig.fixedAmount || 0} / ${
+                        { daily: '每日', weekly: '每周', monthly: '每月', yearly: '每年' }[group.interestConfig.frequency] || ''
+                      }`
+                      : `${group.interestConfig.type === 'simple' ? '单利' : '复利'} · ${group.interestConfig.rate}% / ${
                       { daily: '每日', weekly: '每周', monthly: '每月', yearly: '每年' }[group.interestConfig.frequency] || ''
                     }`}
                 </span>
@@ -652,6 +702,7 @@ function GroupDetailsContent() {
                           {record.type === "INTEREST" && "自动计息"}
                         </span>
                         <span className="text-xs text-gray-500 mt-1">{record.createdAt ? new Date(getTimeValue(record.createdAt)).toLocaleString() : "刚刚"}</span>
+                        <span className="text-xs text-gray-500 mt-1">操作人：{getRecordOperatorLabel(record)}</span>
                         {record.note && <span className="text-xs text-gray-500 mt-1 break-words">备注：{record.note}</span>}
                       </div>
                       <span className={`font-black ${record.type === 'DEDUCT' ? 'text-orange-500' : 'text-primary'}`}>

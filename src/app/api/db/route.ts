@@ -300,7 +300,8 @@ export async function POST(request: Request) {
       if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       const nextConfig = resolveSentinels({
         ...interestConfig,
-        rate: Number(interestConfig?.rate) || 0
+        rate: Number(interestConfig?.rate) || 0,
+        fixedAmount: Number(interestConfig?.fixedAmount) || 0
       });
       await adminDb.collection("Groups").doc(groupId).update({
         interestConfig: nextConfig,
@@ -313,10 +314,10 @@ export async function POST(request: Request) {
         targetType: "group",
         targetId: groupId,
         summary: "更新计息规则",
-        metadata: { type: interestConfig?.type, frequency: interestConfig?.frequency, rate: Number(interestConfig?.rate) || 0 },
+        metadata: { type: interestConfig?.type, frequency: interestConfig?.frequency, rate: Number(interestConfig?.rate) || 0, fixedAmount: Number(interestConfig?.fixedAmount) || 0, lastCalculatedAt: interestConfig?.lastCalculatedAt || null },
         actorName,
         displayTitle: `${actorName}更新了计息规则`,
-        displayDetail: `类型：${interestConfig?.type || "none"}；频率：${interestConfig?.frequency || "none"}；利率：${Number(interestConfig?.rate) || 0}%`
+        displayDetail: `类型：${interestConfig?.type || "none"}；频率：${interestConfig?.frequency || "none"}；利率：${Number(interestConfig?.rate) || 0}%；固定数量：${Number(interestConfig?.fixedAmount) || 0}`
       });
       return NextResponse.json({ success: true });
     }
@@ -687,6 +688,11 @@ export async function POST(request: Request) {
     else if (action === "transaction_interest") {
       const groupRef = adminDb.collection("Groups").doc(docId);
       const now = new Date();
+      let appliedMemberCount = 0;
+      let appliedTotalInterest = 0;
+      let appliedPeriods = 0;
+      let appliedFromIso = "";
+      let appliedToIso = "";
       await adminDb.runTransaction(async (transaction) => {
         const freshGroup = await transaction.get(groupRef);
         if (!freshGroup.exists) return;
@@ -703,6 +709,8 @@ export async function POST(request: Request) {
         else if (freq === "monthly") freshPeriods = Math.floor(days / 30);
         else if (freq === "yearly") freshPeriods = Math.floor(days / 365);
         if (freshPeriods < 1) return;
+        appliedPeriods = freshPeriods;
+        appliedFromIso = freshLastDate.toISOString();
 
         const msPerPeriod = {
           daily: 86400000,
@@ -711,11 +719,16 @@ export async function POST(request: Request) {
           yearly: 31536000000
         }[freq] as number;
         const newLastCalculatedTime = new Date(freshLastDate.getTime() + freshPeriods * msPerPeriod);
+        appliedToIso = newLastCalculatedTime.toISOString();
 
         const membersQuery = adminDb.collection("Members").where("groupId", "==", docId);
         const membersSnap = await transaction.get(membersQuery);
         const rate = Number(freshConfig.rate || 0) / 100;
+        const fixedAmount = Number(freshConfig.fixedAmount || 0);
         const isCompound = freshConfig.type === "compound";
+        const isFixed = freshConfig.type === "fixed";
+        let transactionMemberCount = 0;
+        let transactionTotalInterest = 0;
 
         membersSnap.forEach((memberDoc) => {
           const member = memberDoc.data();
@@ -724,7 +737,7 @@ export async function POST(request: Request) {
             let totalInterest = 0;
 
             for (let i = 0; i < freshPeriods; i++) {
-              const interestForPeriod = isCompound ? newBalance * rate : Number(member.balance || 0) * rate;
+              const interestForPeriod = isFixed ? fixedAmount : isCompound ? newBalance * rate : Number(member.balance || 0) * rate;
               totalInterest += interestForPeriod;
               newBalance += interestForPeriod;
             }
@@ -746,6 +759,8 @@ export async function POST(request: Request) {
                 amount: totalInterest,
                 createdAt: FieldValue.serverTimestamp()
               });
+              transactionMemberCount += 1;
+              transactionTotalInterest += totalInterest;
             }
           }
         });
@@ -753,7 +768,31 @@ export async function POST(request: Request) {
         transaction.update(groupRef, {
           "interestConfig.lastCalculatedAt": newLastCalculatedTime
         });
+        appliedMemberCount = transactionMemberCount;
+        appliedTotalInterest = transactionTotalInterest;
       });
+      if (appliedMemberCount > 0 && appliedTotalInterest > 0) {
+        const totalInterest = Number(appliedTotalInterest.toFixed(2));
+        await writeAuditLog({
+          groupId: docId,
+          operatorId: "SYSTEM",
+          type: "INTEREST_APPLIED",
+          targetType: "group",
+          targetId: docId,
+          summary: "系统完成自动计息",
+          metadata: {
+            memberCount: appliedMemberCount,
+            totalInterest,
+            periods: appliedPeriods,
+            from: appliedFromIso || null,
+            to: appliedToIso || null
+          },
+          actorName: "系统",
+          amount: totalInterest,
+          displayTitle: `系统完成自动计息，共 ${appliedMemberCount} 名成员增加 ${totalInterest}`,
+          displayDetail: `结息周期：${appliedPeriods}；起算：${appliedFromIso.slice(0, 10) || "-"}；结算到：${appliedToIso.slice(0, 10) || "-"}`
+        });
+      }
       return NextResponse.json({ success: true });
     }
 

@@ -9,7 +9,8 @@ import { Suspense } from "react";
 
 interface InterestConfig {
   rate: number | string;
-  type: "none" | "simple" | "compound";
+  fixedAmount?: number | string;
+  type: "none" | "simple" | "compound" | "fixed";
   frequency: "none" | "daily" | "weekly" | "monthly" | "yearly";
   lastCalculatedAt?: any;
 }
@@ -80,6 +81,36 @@ function getTimeValue(value: any) {
   return 0;
 }
 
+function formatDateTimeLocal(value: any) {
+  const timeValue = getTimeValue(value);
+  if (!timeValue) return "";
+  const date = new Date(timeValue);
+  const pad = (num: number) => String(num).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function formatDateOnly(value: Date) {
+  const pad = (num: number) => String(num).padStart(2, "0");
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+}
+
+function getFrequencyMs(frequency: InterestConfig["frequency"]) {
+  return {
+    none: 0,
+    daily: 86400000,
+    weekly: 604800000,
+    monthly: 2592000000,
+    yearly: 31536000000
+  }[frequency] || 0;
+}
+
+function toIsoFromDateTimeLocal(value: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString();
+}
+
 function formatAuditTime(value: any) {
   const timeValue = getTimeValue(value);
   if (!timeValue) return "刚刚";
@@ -118,6 +149,7 @@ function getAuditTag(log: AuditLog) {
     CLAIM_APPROVAL_SETTING_UPDATED: "认领设置",
     GROUP_SETTINGS_UPDATED: "群组设置",
     INTEREST_SETTINGS_UPDATED: "计息设置",
+    INTEREST_APPLIED: "自动计息",
     CREATOR_TRANSFER: "群主移交"
   };
   return tags[log.type] || "系统记录";
@@ -151,6 +183,7 @@ function getAuditTitle(log: AuditLog) {
   if (log.type === "BALANCE_SET") return typeof log.afterBalance === "number" ? `将${targetName}余额调为 ${log.afterBalance}` : "调整了成员余额";
   if (log.type === "MEMBER_NAME_UPDATED") return cleanLegacySummary(log.summary) || "修改了成员昵称";
   if (log.type === "INTEREST_SETTINGS_UPDATED") return "更新了计息规则";
+  if (log.type === "INTEREST_APPLIED") return cleanLegacySummary(log.summary) || "系统完成自动计息";
   return cleanLegacySummary(log.summary) || getAuditTag(log);
 }
 
@@ -189,9 +222,11 @@ function GroupSettingsContent() {
   const [requireClaimApproval, setRequireClaimApproval] = useState(false);
   const [interestConfig, setInterestConfig] = useState<InterestConfig>({
     rate: 0,
+    fixedAmount: 0,
     type: "none",
     frequency: "none"
   });
+  const [interestStartAt, setInterestStartAt] = useState("");
 
   const [members, setMembers] = useState<MemberData[]>([]);
   const [claimRequests, setClaimRequests] = useState<ClaimRequest[]>([]);
@@ -222,6 +257,7 @@ function GroupSettingsContent() {
         setRequireClaimApproval(!!data.requireClaimApproval);
         if (data.interestConfig) {
           setInterestConfig(data.interestConfig);
+          setInterestStartAt(formatDateTimeLocal(data.interestConfig.lastCalculatedAt));
         }
 
         setMembers(fetchedMembers);
@@ -255,16 +291,22 @@ function GroupSettingsContent() {
     e.preventDefault();
     setIsSaving(true);
     try {
+      const nextLastCalculatedAt = interestConfig.type === "none"
+        ? null
+        : isCreator && interestStartAt
+          ? toIsoFromDateTimeLocal(interestStartAt)
+          : interestConfig.lastCalculatedAt || { __serverTimestamp: true };
       await proxyRequest({ action: "updateGroupInterest", data: { groupId,
         interestConfig: {
           ...interestConfig,
           rate: Number(interestConfig.rate) || 0,
-          // Initialize lastCalculatedAt if activating interest for the first time
-          lastCalculatedAt: interestConfig.type !== "none" && !interestConfig.lastCalculatedAt 
-            ? { __serverTimestamp: true }
-            : interestConfig.lastCalculatedAt || null
+          fixedAmount: Number(interestConfig.fixedAmount) || 0,
+          lastCalculatedAt: nextLastCalculatedAt
         }
       }});
+      if (typeof nextLastCalculatedAt === "string") {
+        setInterestConfig(prev => ({ ...prev, lastCalculatedAt: nextLastCalculatedAt }));
+      }
       alert("计息设置已保存");
     } catch (err) { alert("保存失败"); }
     finally { setIsSaving(false); }
@@ -334,16 +376,23 @@ function GroupSettingsContent() {
   };
 
   const renderPreview = () => {
-    if (interestConfig.type === "none" || interestConfig.frequency === "none" || Number(interestConfig.rate) <= 0) {
+    const isFixedInterest = interestConfig.type === "fixed";
+    const hasValidAmount = isFixedInterest ? Number(interestConfig.fixedAmount) > 0 : Number(interestConfig.rate) > 0;
+    if (interestConfig.type === "none" || interestConfig.frequency === "none" || !hasValidAmount) {
       return <p className="text-sm text-gray-500">当前未开启计息，或参数未配置完整。</p>;
     }
 
     let balances = [10];
     const rate = (Number(interestConfig.rate) || 0) / 100;
+    const fixedAmount = Number(interestConfig.fixedAmount) || 0;
+    const frequencyMs = getFrequencyMs(interestConfig.frequency);
+    const baseTime = getTimeValue(interestStartAt || interestConfig.lastCalculatedAt) || Date.now();
     
     for (let i = 1; i <= 6; i++) {
       let prev = balances[i-1];
-      if (interestConfig.type === "simple") {
+      if (interestConfig.type === "fixed") {
+        balances.push(prev + fixedAmount);
+      } else if (interestConfig.type === "simple") {
         // Simple interest: base is always 10
         balances.push(prev + 10 * rate);
       } else {
@@ -353,9 +402,10 @@ function GroupSettingsContent() {
     }
 
     const previewItems = [
-      { label: "初始", value: "10.00", isInitial: true },
+      { label: "初始", value: "10.00", date: formatDateOnly(new Date(baseTime)), isInitial: true },
       ...balances.slice(1).map((balance, index) => ({
         label: `第 ${index + 1} 期`,
+        date: frequencyMs ? formatDateOnly(new Date(baseTime + frequencyMs * (index + 1))) : "-",
         value: balance.toFixed(2),
         isInitial: false
       }))
@@ -364,11 +414,14 @@ function GroupSettingsContent() {
     return (
       <div className="mt-4 bg-gray-50 dark:bg-gray-800/50 p-4 rounded-xl border border-gray-100 dark:border-gray-800">
         <h5 className="text-sm font-bold text-gray-900 dark:text-white mb-3">预览 (基于当前设置)</h5>
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 text-center text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
           {previewItems.map(item => (
-            <div key={item.label} className="rounded-lg bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 px-2 py-3">
-              <div className="font-bold text-gray-500 mb-1">{item.label}</div>
-              <div className={`font-mono font-bold ${item.isInitial ? "text-gray-900 dark:text-white" : "text-primary"}`}>
+            <div key={item.label} className="rounded-lg bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 px-3 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="font-bold text-gray-500">{item.label}</div>
+                <div className="font-mono text-[11px] text-gray-400">{item.date}</div>
+              </div>
+              <div className={`font-mono font-bold mt-2 text-base ${item.isInitial ? "text-gray-900 dark:text-white" : "text-primary"}`}>
                 {item.value}
               </div>
             </div>
@@ -596,6 +649,7 @@ function GroupSettingsContent() {
                   <option value="none">无利息 (关闭)</option>
                   <option value="simple">单利 (仅按本金)</option>
                   <option value="compound">复利 (利滚利)</option>
+                  <option value="fixed">固定数量 (每期固定增加)</option>
                 </select>
               </div>
               <div>
@@ -610,10 +664,33 @@ function GroupSettingsContent() {
               </div>
             </div>
             
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">每期利率 (%)</label>
-              <input type="number" min="0" step="0.1" value={interestConfig.rate} onChange={e => setInterestConfig({...interestConfig, rate: e.target.value === '' ? '' : e.target.value})} disabled={interestConfig.type === "none"} className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 focus:bg-white dark:focus:bg-gray-900 focus:ring-2 focus:ring-primary outline-none transition-all disabled:opacity-50" />
-            </div>
+            {interestConfig.type === "fixed" ? (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">每期固定增加数量</label>
+                <input type="number" min="0" step="0.01" value={interestConfig.fixedAmount ?? ""} onChange={e => setInterestConfig({...interestConfig, fixedAmount: e.target.value === '' ? '' : e.target.value})} className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 focus:bg-white dark:focus:bg-gray-900 focus:ring-2 focus:ring-primary outline-none transition-all disabled:opacity-50" />
+              </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">每期利率 (%)</label>
+                <input type="number" min="0" step="0.1" value={interestConfig.rate} onChange={e => setInterestConfig({...interestConfig, rate: e.target.value === '' ? '' : e.target.value})} disabled={interestConfig.type === "none"} className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 focus:bg-white dark:focus:bg-gray-900 focus:ring-2 focus:ring-primary outline-none transition-all disabled:opacity-50" />
+              </div>
+            )}
+
+            {isCreator && (
+              <div className="rounded-2xl border border-amber-100 dark:border-amber-900/30 bg-amber-50/60 dark:bg-amber-900/10 p-4">
+                <label className="block text-sm font-bold text-gray-900 dark:text-white mb-1">计息起算时间</label>
+                <input
+                  type="datetime-local"
+                  value={interestStartAt}
+                  onChange={e => setInterestStartAt(e.target.value)}
+                  disabled={interestConfig.type === "none"}
+                  className="w-full px-4 py-3 rounded-xl border border-amber-200 dark:border-amber-900/40 bg-white dark:bg-gray-950 focus:ring-2 focus:ring-primary outline-none transition-all disabled:opacity-50"
+                />
+                <p className="text-xs text-amber-700/80 dark:text-amber-300/80 mt-2 leading-relaxed">
+                  该时间会作为全群下一次自动计息的统一基准，调整后不会回滚已生成的历史利息流水。
+                </p>
+              </div>
+            )}
 
             {renderPreview()}
 
