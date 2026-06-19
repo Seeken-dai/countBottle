@@ -404,7 +404,7 @@ function GroupSettingsContent() {
     const previewItems = [
       { label: "初始", value: "10.00", date: formatDateOnly(new Date(baseTime)), isInitial: true },
       ...balances.slice(1).map((balance, index) => ({
-        label: `第 ${index + 1} 期`,
+        label: `第${index + 1}期`,
         date: frequencyMs ? formatDateOnly(new Date(baseTime + frequencyMs * (index + 1))) : "-",
         value: balance.toFixed(2),
         isInitial: false
@@ -414,12 +414,12 @@ function GroupSettingsContent() {
     return (
       <div className="mt-4 bg-gray-50 dark:bg-gray-800/50 p-4 rounded-xl border border-gray-100 dark:border-gray-800">
         <h5 className="text-sm font-bold text-gray-900 dark:text-white mb-3">预览 (基于当前设置)</h5>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
           {previewItems.map(item => (
             <div key={item.label} className="rounded-lg bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 px-3 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="font-bold text-gray-500">{item.label}</div>
-                <div className="font-mono text-[11px] text-gray-400">{item.date}</div>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <div className="font-bold text-gray-600 dark:text-gray-300 whitespace-nowrap">{item.label}</div>
+                <div className="font-mono text-[11px] text-gray-400 whitespace-nowrap">{item.date}</div>
               </div>
               <div className={`font-mono font-bold mt-2 text-base ${item.isInitial ? "text-gray-900 dark:text-white" : "text-primary"}`}>
                 {item.value}
@@ -678,7 +678,7 @@ function GroupSettingsContent() {
 
             {isCreator && (
               <div className="rounded-2xl border border-amber-100 dark:border-amber-900/30 bg-amber-50/60 dark:bg-amber-900/10 p-4">
-                <label className="block text-sm font-bold text-gray-900 dark:text-white mb-1">计息起算时间</label>
+                <label className="block text-sm font-bold text-gray-900 dark:text-white mb-1">计息基准时间</label>
                 <input
                   type="datetime-local"
                   value={interestStartAt}
@@ -687,7 +687,7 @@ function GroupSettingsContent() {
                   className="w-full px-4 py-3 rounded-xl border border-amber-200 dark:border-amber-900/40 bg-white dark:bg-gray-950 focus:ring-2 focus:ring-primary outline-none transition-all disabled:opacity-50"
                 />
                 <p className="text-xs text-amber-700/80 dark:text-amber-300/80 mt-2 leading-relaxed">
-                  该时间会作为全群下一次自动计息的统一基准，调整后不会回滚已生成的历史利息流水。
+                  系统会从该时间开始累计完整周期，到达下一周期时触发结息；调整后不会回滚已生成的历史利息流水。
                 </p>
               </div>
             )}
