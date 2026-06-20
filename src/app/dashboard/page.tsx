@@ -39,7 +39,7 @@ export default function DashboardPage() {
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
   const [joinGroupId, setJoinGroupId] = useState("");
 
-  const { data, error, mutate } = useSWR(user ? '/api/groups' : null, fetcher, { refreshInterval: 5000 });
+  const { data, error, mutate } = useSWR(user ? '/api/groups' : null, fetcher, { refreshInterval: 60_000, refreshWhenHidden: false, revalidateOnFocus: true });
   const groups = (data?.groups || []) as Group[];
   const isSuperAdmin = data?.isSuperAdmin || false;
   const isLoadingGroups = !data && !error && !!user;

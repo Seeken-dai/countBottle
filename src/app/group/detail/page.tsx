@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { getDocProxy, proxyRequest, queryProxy, updateDocProxy } from "@/lib/useFirestore";
+import { startVisibleRefresh } from "@/lib/visible-refresh";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Modal } from "@/components/ui/modal";
 import Link from "next/link";
@@ -120,6 +121,7 @@ function GroupDetailsContent() {
   const [pendingClaimMemberIds, setPendingClaimMemberIds] = useState<Set<string>>(new Set());
   const [pendingReviewCount, setPendingReviewCount] = useState(0);
   const [recordOperatorNames, setRecordOperatorNames] = useState<Record<string, string>>({});
+  const [refreshToken, setRefreshToken] = useState(0);
 
   // LAZY EVALUATION FOR INTEREST
   const triggerLazyInterest = async (groupData: Group) => {
@@ -170,19 +172,16 @@ function GroupDetailsContent() {
       setGroupRecords(recs);
     };
 
-    const refresh = () => {
-      fetchGroupData();
-      fetchMembers();
-      fetchRecords();
+    const refresh = async () => {
+      await Promise.all([fetchGroupData(), fetchMembers(), fetchRecords()]);
     };
-    refresh();
-    const interval = window.setInterval(refresh, 5000);
+    const stopRefreshing = startVisibleRefresh(refresh);
 
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      stopRefreshing();
     };
-  }, [groupId, router]);
+  }, [groupId, router, refreshToken]);
 
   useEffect(() => {
     if (!user) return;
@@ -200,22 +199,6 @@ function GroupDetailsContent() {
     return () => { cancelled = true; };
   }, [user]);
 
-  useEffect(() => {
-    if (!user || !groupId) return;
-    let cancelled = false;
-
-    const fetchPendingClaims = async () => {
-      const claims = await queryProxy("ClaimRequests", [["groupId", "==", groupId], ["requesterId", "==", user.uid], ["status", "==", "PENDING"]]) as ClaimRequest[];
-      if (!cancelled) setPendingClaimMemberIds(new Set(claims.map(claim => claim.memberId)));
-    };
-
-    fetchPendingClaims();
-    const interval = window.setInterval(fetchPendingClaims, 5000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [groupId, user]);
 
   useEffect(() => {
     if (!selectedMemberId) {
@@ -223,7 +206,7 @@ function GroupDetailsContent() {
     }
     let cancelled = false;
     const fetchMemberRecords = async () => {
-      const recs = await queryProxy("Records", [["memberId", "==", selectedMemberId]]) as LedgerRecord[];
+      const recs = await queryProxy("Records", [["groupId", "==", groupId], ["memberId", "==", selectedMemberId]]) as LedgerRecord[];
       recs.sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
       const operatorIds = Array.from(new Set(recs.map(record => record.operatorId).filter(id => id && id !== "SYSTEM")));
       const operatorEntries = await Promise.all(operatorIds.map(async (operatorId) => {
@@ -236,39 +219,41 @@ function GroupDetailsContent() {
         setRecordOperatorNames(Object.fromEntries(operatorEntries));
       }
     };
-    fetchMemberRecords();
-    const interval = window.setInterval(fetchMemberRecords, 5000);
+    const stopRefreshing = startVisibleRefresh(fetchMemberRecords);
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      stopRefreshing();
     };
-  }, [selectedMemberId]);
+  }, [groupId, selectedMemberId]);
 
   const currentUserMember = members.find(m => m.userId === user?.uid);
   const isCreator = group?.creatorId === user?.uid || (group as any)?.createdBy === user?.uid;
   const isSubAdmin = currentUserMember?.role === "SUB_ADMIN" || currentUserMember?.role === "ADMIN" || currentUserMember?.role === "OWNER";
   const isAdmin = isCreator || isSubAdmin;
   const hasClaimed = !!currentUserMember;
-
   useEffect(() => {
-    if (!isAdmin || !groupId) {
-      setPendingReviewCount(0);
-      return;
-    }
+    if (!user || !groupId) return;
     let cancelled = false;
 
-    const fetchPendingReviews = async () => {
-      const claims = await queryProxy("ClaimRequests", [["groupId", "==", groupId], ["status", "==", "PENDING"]]) as ClaimRequest[];
-      if (!cancelled) setPendingReviewCount(claims.length);
+    const fetchPendingClaims = async () => {
+      const filters = isAdmin
+        ? [["groupId", "==", groupId], ["status", "==", "PENDING"]]
+        : [["groupId", "==", groupId], ["requesterId", "==", user.uid], ["status", "==", "PENDING"]];
+      const claims = await queryProxy("ClaimRequests", filters) as ClaimRequest[];
+      if (!cancelled) {
+        setPendingClaimMemberIds(new Set(
+          claims.filter((claim) => claim.requesterId === user.uid).map((claim) => claim.memberId)
+        ));
+        setPendingReviewCount(isAdmin ? claims.length : 0);
+      }
     };
 
-    fetchPendingReviews();
-    const interval = window.setInterval(fetchPendingReviews, 5000);
+    const stopRefreshing = startVisibleRefresh(fetchPendingClaims);
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      stopRefreshing();
     };
-  }, [groupId, isAdmin]);
+  }, [groupId, user, isAdmin]);
 
   const getRecordOperatorLabel = (record: LedgerRecord) => {
     if (record.operatorId === "SYSTEM") return "系统自动计息";
@@ -329,6 +314,7 @@ function GroupDetailsContent() {
     setIsActionLoading(true);
     try {
       await proxyRequest({ action: "addMember", data: { groupId, remarkName: newMemberName.trim() } });
+      setRefreshToken((value) => value + 1);
       setIsAddMemberModalOpen(false);
       setNewMemberName("");
     } catch (err) { alert("添加成员失败"); } finally { setIsActionLoading(false); }
@@ -361,6 +347,8 @@ function GroupDetailsContent() {
       if (result?.status === "PENDING") {
         setPendingClaimMemberIds(prev => new Set(prev).add(memberId));
         alert("认领申请已提交，等待管理员审核。");
+      } else if (result?.status === "APPROVED") {
+        setRefreshToken((value) => value + 1);
       }
     } catch (err: any) { alert(err.message || "认领失败"); }
   };
@@ -396,6 +384,7 @@ function GroupDetailsContent() {
 
     try {
       await proxyRequest({ action: "quickAddRecord", data: { groupId, memberId } });
+      setRefreshToken((value) => value + 1);
     } catch (err) { alert("操作失败"); }
   };
 
@@ -418,6 +407,7 @@ function GroupDetailsContent() {
           note: recordNote.trim()
         }
       });
+      setRefreshToken((value) => value + 1);
       setRecordAmount("");
       setRecordNote("");
       setSelectedMemberId(null);
@@ -442,7 +432,10 @@ function GroupDetailsContent() {
   const handleUnbind = async () => {
     if (!isCreator || !selectedMember || !selectedMember.userId) return;
     if (!confirm("确认要强制解绑该成员吗？解绑后卡片将变为空白卡片供重新认领，但流水会保留。")) return;
-    try { await proxyRequest({ action: "unbindMember", data: { groupId, memberId: selectedMember.id } }); } 
+    try {
+      await proxyRequest({ action: "unbindMember", data: { groupId, memberId: selectedMember.id } });
+      setRefreshToken((value) => value + 1);
+    }
     catch (err) { alert("解绑失败"); }
   };
 
@@ -452,6 +445,7 @@ function GroupDetailsContent() {
     try {
       await proxyRequest({ action: "deleteMember", data: { groupId, memberId: selectedMember.id } });
       setSelectedMemberId(null);
+      setRefreshToken((value) => value + 1);
     } catch (err) { alert("删除失败"); }
   };
 

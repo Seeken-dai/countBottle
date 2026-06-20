@@ -16,14 +16,14 @@ export const proxyRequest = async (body: any) => {
 export function useQueryProxy(collection: string, where?: any[], orderBy?: any[]) {
   const body = { action: "query", collection, where, orderBy };
   const key = JSON.stringify(body);
-  const { data, error, mutate } = useSWR(key, () => proxyRequest(body), { refreshInterval: 5000 });
+  const { data, error, mutate } = useSWR(key, () => proxyRequest(body), { refreshInterval: 60_000, refreshWhenHidden: false, revalidateOnFocus: true });
   return { docs: data?.docs || [], loading: !data && !error, error, mutate };
 }
 
 export function useDocProxy(collection: string, docId: string | null) {
   const body = { action: "get", collection, docId };
   const key = docId ? JSON.stringify(body) : null;
-  const { data, error, mutate } = useSWR(key, () => proxyRequest(body), { refreshInterval: 5000 });
+  const { data, error, mutate } = useSWR(key, () => proxyRequest(body), { refreshInterval: 60_000, refreshWhenHidden: false, revalidateOnFocus: true });
   return { doc: data?.doc || null, loading: !data && !error, error, mutate };
 }
 

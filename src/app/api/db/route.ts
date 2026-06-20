@@ -6,6 +6,46 @@ import { getDueInterestSchedule, normalizeInterestScheduleAnchor, type InterestF
 
 export const runtime = "nodejs";
 
+const MAX_QUERY_LIMIT = 500;
+
+const ALLOWED_QUERY_FIELDS: Record<string, ReadonlySet<string>> = {
+  Users: new Set(),
+  Groups: new Set(),
+  Members: new Set(["groupId", "userId"]),
+  Records: new Set(["groupId", "memberId"]),
+  ClaimRequests: new Set(["groupId", "requesterId", "status"]),
+  AuditLogs: new Set(["groupId", "type"])
+};
+const ALLOWED_GET_COLLECTIONS = new Set(["Groups", "Users", "SuperAdmins"]);
+
+type WhereClause = [string, "==", unknown];
+
+function parseWhereClauses(value: unknown): WhereClause[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return null;
+  const clauses: WhereClause[] = [];
+  for (const clause of value) {
+    if (!Array.isArray(clause) || clause.length !== 3 || typeof clause[0] !== "string" || clause[1] !== "==") return null;
+    clauses.push([clause[0], clause[1], clause[2]]);
+  }
+  return clauses;
+}
+
+function getEqualityValue(clauses: WhereClause[], field: string) {
+  return clauses.find((clause) => clause[0] === field)?.[2];
+}
+
+function getSafeQueryLimit(value: unknown) {
+  if (value === undefined) return MAX_QUERY_LIMIT;
+  if (!Number.isInteger(value) || Number(value) < 1) return null;
+  return Math.min(Number(value), MAX_QUERY_LIMIT);
+}
+
+function hasOnlyKeys(value: unknown, allowedKeys: ReadonlySet<string>) {
+  return !!value && typeof value === "object" && !Array.isArray(value)
+    && Object.keys(value).every((key) => allowedKeys.has(key));
+}
+
 function serializeFirestore(value: any): any {
   if (!value) return value;
   if (typeof value.toDate === "function") return value.toDate().toISOString();
@@ -146,52 +186,104 @@ export async function POST(request: Request) {
     const actorName = getUserDisplayName(user);
 
     if (action === "query") {
+      const allowedFields = ALLOWED_QUERY_FIELDS[collection];
+      const clauses = parseWhereClauses(where);
+      const safeLimit = getSafeQueryLimit(limit);
+      if (!allowedFields || !clauses || safeLimit === null) {
+        return NextResponse.json({ error: "Invalid query" }, { status: 400 });
+      }
+      if (clauses.some((clause) => !allowedFields.has(clause[0]))) {
+        return NextResponse.json({ error: "Query field is not allowed" }, { status: 400 });
+      }
+      if (orderBy && (!Array.isArray(orderBy) || orderBy[0] !== "createdAt" || ![undefined, "asc", "desc"].includes(orderBy[1]))) {
+        return NextResponse.json({ error: "Invalid order" }, { status: 400 });
+      }
+
+      const groupId = getEqualityValue(clauses, "groupId");
+      const requestedUserId = getEqualityValue(clauses, "userId");
+      const requesterId = getEqualityValue(clauses, "requesterId");
+      const isGlobalAdminQuery = (collection === "Users" || collection === "Groups") && clauses.length === 0;
+      if (isGlobalAdminQuery && !(await isSuperAdmin(user.uid))) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      if (["Members", "Records", "ClaimRequests", "AuditLogs"].includes(collection) && typeof groupId !== "string") {
+        return NextResponse.json({ error: "A groupId filter is required" }, { status: 400 });
+      }
+      if (collection === "Members" && requestedUserId && requestedUserId !== user.uid && !(await canManageGroup(String(groupId), user.uid))) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      if (collection === "ClaimRequests" && requesterId !== user.uid && !(await canManageGroup(String(groupId), user.uid))) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      if (collection === "AuditLogs" && !(await canManageGroup(String(groupId), user.uid))) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+
       const ref = adminDb.collection(collection);
       let query: Query = ref;
-      if (where) {
-        where.forEach((w: any) => {
-          // Resolve special variable 'user.uid'
-          const val = w[2] === "user.uid" ? user.uid : w[2];
-          query = query.where(w[0], w[1], val);
-        });
+      for (const clause of clauses) {
+        const val = clause[2] === "user.uid" ? user.uid : clause[2];
+        query = query.where(clause[0], clause[1], val);
       }
       if (orderBy) {
         query = query.orderBy(orderBy[0], orderBy[1] || "asc");
       }
-      if (limit) {
-        query = query.limit(limit);
-      }
+      query = query.limit(safeLimit);
       const snapshot = await query.get();
       const docs = snapshot.docs.map((d: any) => serializeFirestore({ id: d.id, ...d.data() }));
       return NextResponse.json({ docs });
     } 
     else if (action === "get") {
+      if (!ALLOWED_GET_COLLECTIONS.has(collection) || typeof docId !== "string" || !docId) {
+        return NextResponse.json({ error: "Invalid document request" }, { status: 400 });
+      }
+      if (collection === "SuperAdmins" && docId !== user.uid) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
       const ref = adminDb.collection(collection);
       const docSnap = await ref.doc(docId).get();
       if (!docSnap.exists) return NextResponse.json({ doc: null });
-      return NextResponse.json({ doc: serializeFirestore({ id: docSnap.id, ...docSnap.data() }) });
+      const value = { id: docSnap.id, ...docSnap.data() } as Record<string, unknown>;
+      if (collection === "Users" && docId !== user.uid) {
+        return NextResponse.json({ doc: serializeFirestore({
+          id: value.id, uid: value.uid,
+          displayName: value.displayName, photoURL: value.photoURL
+        }) });
+      }
+      return NextResponse.json({ doc: serializeFirestore(value) });
     }
     else if (action === "add") {
-      const ref = adminDb.collection(collection);
-      const newRef = ref.doc();
-      const payload = resolveSentinels({ ...data, createdAt: data?.createdAt || FieldValue.serverTimestamp() });
-      await newRef.set(payload);
+      const allowedMemberKeys = new Set(["groupId", "userId", "role", "remarkName", "balance", "totalAdded"]);
+      if (collection !== "Members" || !hasOnlyKeys(data, allowedMemberKeys)
+        || data.userId !== user.uid || data.role !== "MEMBER"
+        || data.balance !== 0 || data.totalAdded !== 0 || typeof data.groupId !== "string"
+        || typeof data.remarkName !== "string" || !data.remarkName.trim()
+        || data.remarkName.trim().length > 20) {
+        return NextResponse.json({ error: "Invalid member data" }, { status: 400 });
+      }
+      const groupSnap = await adminDb.collection("Groups").doc(data.groupId).get();
+      if (!groupSnap.exists) return NextResponse.json({ error: "Group not found" }, { status: 404 });
+      const existingMember = await adminDb.collection("Members")
+        .where("groupId", "==", data.groupId).where("userId", "==", user.uid).limit(1).get();
+      if (!existingMember.empty) return NextResponse.json({ error: "User already joined this group" }, { status: 409 });
+      const newRef = adminDb.collection("Members").doc();
+      await newRef.set(resolveSentinels({ ...data, createdAt: FieldValue.serverTimestamp() }));
       return NextResponse.json({ id: newRef.id });
     }
     else if (action === "set") {
-      const ref = adminDb.collection(collection);
-      await ref.doc(docId).set(resolveSentinels(data), { merge: body.merge !== false });
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ error: "Generic set is not allowed" }, { status: 403 });
     }
     else if (action === "update") {
-      const ref = adminDb.collection(collection);
-      await ref.doc(docId).update(resolveSentinels({ ...data, updatedAt: FieldValue.serverTimestamp() }));
+      const allowedUserKeys = new Set(["groupMemberSortOption"]);
+      if (collection !== "Users" || docId !== user.uid || !hasOnlyKeys(data, allowedUserKeys)
+        || !["time", "name", "balance"].includes(data.groupMemberSortOption)) {
+        return NextResponse.json({ error: "Invalid user update" }, { status: 400 });
+      }
+      await adminDb.collection("Users").doc(user.uid).update(resolveSentinels({ ...data, updatedAt: FieldValue.serverTimestamp() }));
       return NextResponse.json({ success: true });
     }
     else if (action === "delete") {
-      const ref = adminDb.collection(collection);
-      await ref.doc(docId).delete();
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ error: "Generic delete is not allowed" }, { status: 403 });
     }
     else if (action === "batchDeleteGroup") {
       const groupSnap = await adminDb.collection("Groups").doc(docId).get();
