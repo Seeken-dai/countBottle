@@ -18,21 +18,22 @@ const ALLOWED_QUERY_FIELDS: Record<string, ReadonlySet<string>> = {
 };
 const ALLOWED_GET_COLLECTIONS = new Set(["Groups", "Users", "SuperAdmins"]);
 
-type WhereClause = [string, "==", unknown];
+type WhereClause = [string, "==" | "in", unknown];
 
 function parseWhereClauses(value: unknown): WhereClause[] | null {
   if (value === undefined) return [];
   if (!Array.isArray(value)) return null;
   const clauses: WhereClause[] = [];
   for (const clause of value) {
-    if (!Array.isArray(clause) || clause.length !== 3 || typeof clause[0] !== "string" || clause[1] !== "==") return null;
+    if (!Array.isArray(clause) || clause.length !== 3 || typeof clause[0] !== "string"
+      || (clause[1] !== "==" && clause[1] !== "in")) return null;
     clauses.push([clause[0], clause[1], clause[2]]);
   }
   return clauses;
 }
 
 function getEqualityValue(clauses: WhereClause[], field: string) {
-  return clauses.find((clause) => clause[0] === field)?.[2];
+  return clauses.find((clause) => clause[0] === field && clause[1] === "==")?.[2];
 }
 
 function getSafeQueryLimit(value: unknown) {
@@ -182,10 +183,11 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { action, collection, docId, data, where, orderBy, limit } = body;
+    const { action, collection, docId, data, where, orderBy, limit, cursor } = body;
     const actorName = getUserDisplayName(user);
 
-    if (action === "query") {
+    if (action === "query" || action === "queryPage") {
+      const isPagedQuery = action === "queryPage";
       const allowedFields = ALLOWED_QUERY_FIELDS[collection];
       const clauses = parseWhereClauses(where);
       const safeLimit = getSafeQueryLimit(limit);
@@ -195,9 +197,26 @@ export async function POST(request: Request) {
       if (clauses.some((clause) => !allowedFields.has(clause[0]))) {
         return NextResponse.json({ error: "Query field is not allowed" }, { status: 400 });
       }
+      const invalidInClause = clauses.some((clause) => clause[1] === "in" && (
+        collection !== "AuditLogs" || clause[0] !== "type" || !Array.isArray(clause[2])
+        || clause[2].length < 1 || clause[2].length > 10
+        || clause[2].some((value) => typeof value !== "string")
+      ));
+      if (invalidInClause) {
+        return NextResponse.json({ error: "Invalid in query" }, { status: 400 });
+      }
+
       if (orderBy && (!Array.isArray(orderBy) || orderBy[0] !== "createdAt" || ![undefined, "asc", "desc"].includes(orderBy[1]))) {
         return NextResponse.json({ error: "Invalid order" }, { status: 400 });
       }
+      if (isPagedQuery && (safeLimit > 100 || !["Records", "AuditLogs"].includes(collection)
+        || !Array.isArray(orderBy) || orderBy[0] !== "createdAt" || orderBy[1] !== "desc")) {
+        return NextResponse.json({ error: "Invalid paged query" }, { status: 400 });
+      }
+      if (isPagedQuery && cursor != null && (typeof cursor !== "string" || !cursor)) {
+        return NextResponse.json({ error: "Invalid cursor" }, { status: 400 });
+      }
+
 
       const groupId = getEqualityValue(clauses, "groupId");
       const requestedUserId = getEqualityValue(clauses, "userId");
@@ -228,9 +247,23 @@ export async function POST(request: Request) {
       if (orderBy) {
         query = query.orderBy(orderBy[0], orderBy[1] || "asc");
       }
-      query = query.limit(safeLimit);
+      if (isPagedQuery && cursor) {
+        const cursorDoc = await ref.doc(cursor).get();
+        if (!cursorDoc.exists) return NextResponse.json({ error: "Cursor not found" }, { status: 400 });
+        query = query.startAfter(cursorDoc);
+      }
+      query = query.limit(safeLimit + (isPagedQuery ? 1 : 0));
       const snapshot = await query.get();
-      const docs = snapshot.docs.map((d: any) => serializeFirestore({ id: d.id, ...d.data() }));
+      const hasMore = isPagedQuery && snapshot.docs.length > safeLimit;
+      const pageDocs = isPagedQuery ? snapshot.docs.slice(0, safeLimit) : snapshot.docs;
+      const docs = pageDocs.map((d: any) => serializeFirestore({ id: d.id, ...d.data() }));
+      if (isPagedQuery) {
+        return NextResponse.json({
+          docs,
+          hasMore,
+          nextCursor: hasMore ? pageDocs.at(-1)?.id || null : null
+        });
+      }
       return NextResponse.json({ docs });
     } 
     else if (action === "get") {

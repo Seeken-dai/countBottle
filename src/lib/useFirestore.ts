@@ -27,6 +27,30 @@ export function useDocProxy(collection: string, docId: string | null) {
   return { doc: data?.doc || null, loading: !data && !error, error, mutate };
 }
 
+export type ProxyWhereClause = [string, "==" | "in", unknown];
+export type ProxyOrderBy = [string, "asc" | "desc"];
+
+export interface QueryPage<T> {
+  docs: T[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export async function queryPageProxy<T>(
+  collection: string,
+  where: ProxyWhereClause[],
+  orderBy: ProxyOrderBy,
+  limit: number,
+  cursor?: string | null
+): Promise<QueryPage<T>> {
+  const data = await proxyRequest({ action: "queryPage", collection, where, orderBy, limit, cursor });
+  return {
+    docs: data.docs || [],
+    nextCursor: data.nextCursor || null,
+    hasMore: !!data.hasMore
+  };
+}
+
 export async function queryProxy(collection: string, where?: any[], orderBy?: any[], limit?: number) {
   const data = await proxyRequest({ action: "query", collection, where, orderBy, limit });
   return data.docs || [];

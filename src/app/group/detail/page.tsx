@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { getDocProxy, proxyRequest, queryProxy, updateDocProxy } from "@/lib/useFirestore";
+import { getDocProxy, proxyRequest, queryPageProxy, queryProxy, updateDocProxy } from "@/lib/useFirestore";
+import { InfiniteScrollTrigger } from "@/components/infinite-scroll-trigger";
 import { startVisibleRefresh } from "@/lib/visible-refresh";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Modal } from "@/components/ui/modal";
@@ -47,6 +48,7 @@ interface Member {
   remarkName: string;
   balance: number;
   createdAt: any;
+  totalAdded?: number;
   displayName?: string;
   photoURL?: string;
 }
@@ -113,7 +115,6 @@ function GroupDetailsContent() {
   const selectedMember = activeMember;
   
   const [memberRecords, setMemberRecords] = useState<LedgerRecord[]>([]);
-  const [groupRecords, setGroupRecords] = useState<LedgerRecord[]>([]);
   const [recordActionType, setRecordActionType] = useState<"ADD" | "DEDUCT" | "SET">("ADD");
   const [recordAmount, setRecordAmount] = useState<string>("");
   const [recordNote, setRecordNote] = useState<string>("");
@@ -122,7 +123,13 @@ function GroupDetailsContent() {
   const [pendingReviewCount, setPendingReviewCount] = useState(0);
   const [recordOperatorNames, setRecordOperatorNames] = useState<Record<string, string>>({});
   const [refreshToken, setRefreshToken] = useState(0);
+  const [memberRecordsHasMore, setMemberRecordsHasMore] = useState(false);
+  const [memberRecordsLoading, setMemberRecordsLoading] = useState(false);
+  const [memberRecordsError, setMemberRecordsError] = useState<string | null>(null);
+  const memberRecordsCursorRef = useRef<string | null>(null);
+  const memberRecordsLoadingRef = useRef(false);
 
+  const memberRecordsRequestRef = useRef(0);
   // LAZY EVALUATION FOR INTEREST
   const triggerLazyInterest = async (groupData: Group) => {
     if (!groupData.interestConfig || groupData.interestConfig.type === "none" || groupData.interestConfig.frequency === "none" || !groupData.interestConfig.nextInterestAt) {
@@ -166,14 +173,8 @@ function GroupDetailsContent() {
       setMembers(resolvedMembers);
     };
 
-    const fetchRecords = async () => {
-      const recs = await queryProxy("Records", [["groupId", "==", groupId]]) as LedgerRecord[];
-      if (cancelled) return;
-      setGroupRecords(recs);
-    };
-
     const refresh = async () => {
-      await Promise.all([fetchGroupData(), fetchMembers(), fetchRecords()]);
+      await Promise.all([fetchGroupData(), fetchMembers()]);
     };
     const stopRefreshing = startVisibleRefresh(refresh);
 
@@ -199,32 +200,79 @@ function GroupDetailsContent() {
     return () => { cancelled = true; };
   }, [user]);
 
-
-  useEffect(() => {
-    if (!selectedMemberId) {
-      return;
+  const loadMemberRecords = useCallback(async (reset = false) => {
+    if (!selectedMemberId || (memberRecordsLoadingRef.current && !reset)) return;
+    if (reset) {
+      memberRecordsRequestRef.current += 1;
+      memberRecordsLoadingRef.current = false;
+      memberRecordsCursorRef.current = null;
+      setMemberRecords([]);
+      setRecordOperatorNames({});
+      setMemberRecordsHasMore(true);
     }
-    let cancelled = false;
-    const fetchMemberRecords = async () => {
-      const recs = await queryProxy("Records", [["groupId", "==", groupId], ["memberId", "==", selectedMemberId]]) as LedgerRecord[];
-      recs.sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
-      const operatorIds = Array.from(new Set(recs.map(record => record.operatorId).filter(id => id && id !== "SYSTEM")));
+
+    const requestId = memberRecordsRequestRef.current;
+    memberRecordsLoadingRef.current = true;
+    setMemberRecordsLoading(true);
+    setMemberRecordsError(null);
+    try {
+      const page = await queryPageProxy<LedgerRecord>(
+        "Records",
+        [["groupId", "==", groupId], ["memberId", "==", selectedMemberId]],
+        ["createdAt", "desc"],
+        30,
+        memberRecordsCursorRef.current
+      );
+      if (requestId !== memberRecordsRequestRef.current) return;
+
+      const operatorIds = Array.from(new Set(
+        page.docs.map((record) => record.operatorId).filter((id) => id && id !== "SYSTEM")
+      ));
       const operatorEntries = await Promise.all(operatorIds.map(async (operatorId) => {
         const operator = await getDocProxy("Users", operatorId);
-        const displayName = operator?.displayName || operator?.email?.split("@")[0] || "未知用户";
-        return [operatorId, displayName] as const;
+        return [operatorId, operator?.displayName || "未知用户"] as const;
       }));
-      if (!cancelled) {
-        setMemberRecords(recs);
-        setRecordOperatorNames(Object.fromEntries(operatorEntries));
+      if (requestId !== memberRecordsRequestRef.current) return;
+
+      setMemberRecords((previous) => reset
+        ? page.docs
+        : [...previous, ...page.docs.filter((record) => !previous.some((item) => item.id === record.id))]);
+      setRecordOperatorNames((previous) => ({ ...previous, ...Object.fromEntries(operatorEntries) }));
+      memberRecordsCursorRef.current = page.nextCursor;
+      setMemberRecordsHasMore(page.hasMore);
+    } catch (error) {
+      if (requestId === memberRecordsRequestRef.current) {
+        setMemberRecordsError(error instanceof Error ? error.message : "流水加载失败");
       }
-    };
-    const stopRefreshing = startVisibleRefresh(fetchMemberRecords);
-    return () => {
-      cancelled = true;
-      stopRefreshing();
-    };
+    } finally {
+      if (requestId === memberRecordsRequestRef.current) {
+        memberRecordsLoadingRef.current = false;
+        setMemberRecordsLoading(false);
+      }
+    }
   }, [groupId, selectedMemberId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (selectedMemberId) {
+        void loadMemberRecords(true);
+        return;
+      }
+      memberRecordsRequestRef.current += 1;
+      memberRecordsLoadingRef.current = false;
+      memberRecordsCursorRef.current = null;
+      setMemberRecords([]);
+      setMemberRecordsHasMore(false);
+      setMemberRecordsLoading(false);
+      setMemberRecordsError(null);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      memberRecordsRequestRef.current += 1;
+    };
+  }, [loadMemberRecords, selectedMemberId]);
+
+
 
   const currentUserMember = members.find(m => m.userId === user?.uid);
   const isCreator = group?.creatorId === user?.uid || (group as any)?.createdBy === user?.uid;
@@ -263,40 +311,8 @@ function GroupDetailsContent() {
 
   const remainingTotal = members.reduce((sum, m) => sum + m.balance, 0);
   
-  const cumulativeTotal = useMemo(() => {
-    let total = 0;
-    members.forEach(member => {
-      const memberRecs = groupRecords.filter(r => r.memberId === member.id);
-      memberRecs.sort((a, b) => getTimeValue(a.createdAt) - getTimeValue(b.createdAt));
-      
-      let runningBalance = 0;
-      let memberTotalAdded = 0;
-
-      memberRecs.forEach(record => {
-        if (record.type === "ADD") {
-          runningBalance += record.amount;
-          memberTotalAdded += record.amount;
-        } else if (record.type === "DEDUCT") {
-          runningBalance -= record.amount;
-        } else if (record.type === "INTEREST") {
-          runningBalance += record.amount;
-          memberTotalAdded += record.amount;
-        } else if (record.type === "SET") {
-          if (record.amount > runningBalance) {
-            memberTotalAdded += (record.amount - runningBalance);
-          }
-          runningBalance = record.amount;
-        }
-      });
-
-      if (memberTotalAdded === 0 && member.balance > 0) {
-        memberTotalAdded = member.balance;
-      }
-      
-      total += memberTotalAdded;
-    });
-    return total;
-  }, [groupRecords, members]);
+  const cumulativeTotal = members.reduce(
+    (sum, member) => sum + Number(member.totalAdded ?? member.balance ?? 0), 0);
 
   const sortedMembers = useMemo(() => {
     return [...members].sort((a, b) => {
@@ -686,7 +702,7 @@ function GroupDetailsContent() {
             <div>
               <h5 className="font-bold text-gray-900 dark:text-white mb-3">流水记录</h5>
               <div className="max-h-60 overflow-y-auto space-y-3 pr-2">
-                {memberRecords.length === 0 ? <p className="text-sm text-gray-500 text-center py-4">暂无流水记录</p> : (
+                {!memberRecordsLoading && memberRecords.length === 0 ? <p className="text-sm text-gray-500 text-center py-4">暂无流水记录</p> :
                   memberRecords.map(record => (
                     <div key={record.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800/30 rounded-xl border border-gray-100 dark:border-gray-800">
                       <div className="flex flex-col">
@@ -704,7 +720,15 @@ function GroupDetailsContent() {
                         {record.type === 'DEDUCT' ? '-' : record.type === 'ADD' || record.type === 'INTEREST' ? '+' : ''}{record.amount}
                       </span>
                     </div>
-                  ))
+                  ))}
+                {(memberRecords.length > 0 || memberRecordsLoading || memberRecordsError) && (
+                  <InfiniteScrollTrigger
+                  hasMore={memberRecordsHasMore}
+                  loading={memberRecordsLoading}
+                  error={memberRecordsError}
+                  onLoadMore={loadMemberRecords}
+                  endLabel="已加载全部流水"
+                  />
                 )}
               </div>
             </div>

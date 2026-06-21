@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { getDocProxy, proxyRequest, queryProxy } from "@/lib/useFirestore";
+import { getDocProxy, proxyRequest, queryPageProxy, queryProxy, type ProxyWhereClause } from "@/lib/useFirestore";
+import { InfiniteScrollTrigger } from "@/components/infinite-scroll-trigger";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Suspense } from "react";
 import { addInterestPeriods, createInterestScheduleAnchor, type InterestScheduleAnchor } from "@/lib/interest-schedule";
@@ -74,6 +75,25 @@ const auditFilters: { value: AuditFilter; label: string }[] = [
   { value: "SETTINGS", label: "群组设置" },
   { value: "INTEREST", label: "计息相关" }
 ];
+
+const auditTypesByFilter: Record<Exclude<AuditFilter, "ALL">, string[]> = {
+  BALANCE: ["BALANCE_ADD", "BALANCE_DEDUCT", "BALANCE_SET"],
+  MEMBER: [
+    "CREATOR_TRANSFER", "MEMBER_ADDED", "MEMBER_ROLE_UPDATED",
+    "MEMBER_NAME_UPDATED", "MEMBER_UNBOUND", "MEMBER_DELETED", "MEMBER_CLAIMED"
+  ],
+  CLAIM: [
+    "CLAIM_APPROVAL_SETTING_UPDATED", "CLAIM_REQUESTED", "CLAIM_APPROVED", "CLAIM_REJECTED"
+  ],
+  SETTINGS: ["GROUP_SETTINGS_UPDATED"],
+  INTEREST: ["INTEREST_SETTINGS_UPDATED", "INTEREST_APPLIED"]
+};
+
+function getAuditWhere(groupId: string, filter: AuditFilter) {
+  const where: ProxyWhereClause[] = [["groupId", "==", groupId]];
+  if (filter !== "ALL") where.push(["type", "in", auditTypesByFilter[filter]]);
+  return where;
+}
 
 function getTimeValue(value: any) {
   if (!value) return 0;
@@ -232,6 +252,74 @@ function GroupSettingsContent() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [auditFilter, setAuditFilter] = useState<AuditFilter>("ALL");
   const [expandedAuditLogIds, setExpandedAuditLogIds] = useState<Set<string>>(new Set());
+  const [auditHasMore, setAuditHasMore] = useState(false);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const auditCursorRef = useRef<string | null>(null);
+  const auditLoadingRef = useRef(false);
+  const auditRequestRef = useRef(0);
+
+  const loadAuditLogs = useCallback(async (reset = false) => {
+    if (!isAdmin || (auditLoadingRef.current && !reset)) return;
+    if (reset) {
+      auditRequestRef.current += 1;
+      auditLoadingRef.current = false;
+      auditCursorRef.current = null;
+      setAuditLogs([]);
+      setExpandedAuditLogIds(new Set());
+      setAuditHasMore(true);
+    }
+
+    const requestId = auditRequestRef.current;
+    auditLoadingRef.current = true;
+    setAuditLoading(true);
+    setAuditError(null);
+    try {
+      const page = await queryPageProxy<AuditLog>(
+        "AuditLogs",
+        getAuditWhere(groupId, auditFilter),
+        ["createdAt", "desc"],
+        50,
+        auditCursorRef.current
+      );
+      if (requestId !== auditRequestRef.current) return;
+
+      setAuditLogs((previous) => reset
+        ? page.docs
+        : [...previous, ...page.docs.filter((log) => !previous.some((item) => item.id === log.id))]);
+      auditCursorRef.current = page.nextCursor;
+      setAuditHasMore(page.hasMore);
+    } catch (error) {
+      if (requestId === auditRequestRef.current) {
+        setAuditError(error instanceof Error ? error.message : "日志加载失败");
+      }
+    } finally {
+      if (requestId === auditRequestRef.current) {
+        auditLoadingRef.current = false;
+        setAuditLoading(false);
+      }
+    }
+  }, [auditFilter, groupId, isAdmin]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (isAdmin) {
+        void loadAuditLogs(true);
+        return;
+      }
+      auditRequestRef.current += 1;
+      auditLoadingRef.current = false;
+      auditCursorRef.current = null;
+      setAuditLogs([]);
+      setAuditHasMore(false);
+      setAuditLoading(false);
+      setAuditError(null);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      auditRequestRef.current += 1;
+    };
+  }, [isAdmin, loadAuditLogs]);
 
   useEffect(() => {
     const fetchAuthAndData = async () => {
@@ -263,9 +351,6 @@ function GroupSettingsContent() {
         const fetchedClaims = await queryProxy("ClaimRequests", [["groupId", "==", groupId], ["status", "==", "PENDING"]]) as ClaimRequest[];
         fetchedClaims.sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
         setClaimRequests(fetchedClaims);
-        const fetchedLogs = await queryProxy("AuditLogs", [["groupId", "==", groupId]]) as AuditLog[];
-        fetchedLogs.sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
-        setAuditLogs(fetchedLogs.slice(0, 80));
       } else {
         router.push("/dashboard");
       }
@@ -357,9 +442,7 @@ function GroupSettingsContent() {
       setClaimRequests(prev => prev.filter(item => item.id !== request.id));
       const fetchedMembers = await queryProxy("Members", [["groupId", "==", groupId]]) as MemberData[];
       setMembers(fetchedMembers);
-      const fetchedLogs = await queryProxy("AuditLogs", [["groupId", "==", groupId]]) as AuditLog[];
-      fetchedLogs.sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
-      setAuditLogs(fetchedLogs.slice(0, 80));
+      await loadAuditLogs(true);
     } catch (err: any) {
       alert(err.message || "审核失败");
     } finally {
@@ -367,10 +450,6 @@ function GroupSettingsContent() {
     }
   };
 
-  const filteredAuditLogs = auditLogs.filter(log => {
-    if (auditFilter === "ALL") return true;
-    return getAuditCategory(log.type) === auditFilter;
-  });
 
   const toggleAuditDetail = (logId: string) => {
     setExpandedAuditLogIds(prev => {
@@ -589,9 +668,9 @@ function GroupSettingsContent() {
             </select>
           </div>
           <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-            {filteredAuditLogs.length === 0 ? (
+            {!auditLoading && auditLogs.length === 0 ? (
               <div className="text-center py-6 bg-gray-50 dark:bg-gray-800/50 rounded-xl text-gray-400 text-sm">暂无匹配日志</div>
-            ) : filteredAuditLogs.map(log => {
+            ) : auditLogs.map(log => {
               const detailRows = getAuditDetailRows(log);
               const note = getAuditNote(log);
               const isExpanded = expandedAuditLogIds.has(log.id);
@@ -644,6 +723,15 @@ function GroupSettingsContent() {
                 </div>
               );
             })}
+            {(auditLogs.length > 0 || auditLoading || auditError) && (
+              <InfiniteScrollTrigger
+              hasMore={auditHasMore}
+              loading={auditLoading}
+              error={auditError}
+              onLoadMore={loadAuditLogs}
+              endLabel="已加载全部日志"
+              />
+            )}
           </div>
         </section>
 
