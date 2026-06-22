@@ -240,17 +240,10 @@ export async function POST(request: Request) {
 
       const { startAt, endAt } = getShanghaiSevenDayWindow();
       const recordsRef = adminDb.collection("Records");
-      const [membersSnap, addSnap, deductSnap] = await Promise.all([
+      const [membersSnap, recordsSnap] = await Promise.all([
         adminDb.collection("Members").where("groupId", "==", groupId).get(),
         recordsRef
           .where("groupId", "==", groupId)
-          .where("type", "==", "ADD")
-          .where("createdAt", ">=", startAt)
-          .orderBy("createdAt", "desc")
-          .get(),
-        recordsRef
-          .where("groupId", "==", groupId)
-          .where("type", "==", "DEDUCT")
           .where("createdAt", ">=", startAt)
           .orderBy("createdAt", "desc")
           .get()
@@ -259,10 +252,11 @@ export async function POST(request: Request) {
       const memberNames = new Map(
         membersSnap.docs.map((memberDoc) => [memberDoc.id, getMemberDisplayName(memberDoc.data())])
       );
-      const buildRanking = (docs: typeof addSnap.docs) => {
+      const buildRanking = (type: "ADD" | "DEDUCT") => {
         const totals = new Map<string, { amount: number; lastActivityAt: Date }>();
-        for (const recordDoc of docs) {
+        for (const recordDoc of recordsSnap.docs) {
           const record = recordDoc.data();
+          if (record.type !== type) continue;
           const memberId = typeof record.memberId === "string" ? record.memberId : "";
           const memberName = memberNames.get(memberId);
           const amount = Number(record.amount);
@@ -290,8 +284,8 @@ export async function POST(request: Request) {
       return NextResponse.json({
         from: startAt.toISOString(),
         to: endAt.toISOString(),
-        add: buildRanking(addSnap.docs),
-        deduct: buildRanking(deductSnap.docs)
+        add: buildRanking("ADD"),
+        deduct: buildRanking("DEDUCT")
       });
     }
     else if (action === "query" || action === "queryPage") {
