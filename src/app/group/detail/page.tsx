@@ -10,7 +10,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Modal } from "@/components/ui/modal";
 import Link from "next/link";
 import { motion, AnimatePresence, useSpring, useTransform } from "framer-motion";
-import { ArrowDownRight, ArrowUpRight, RotateCcw, Trophy } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Download, RotateCcw, Share2, Trophy } from "lucide-react";
 import { Suspense } from "react";
 
 function AnimatedNumber({ value }: { value: number }) {
@@ -151,6 +151,9 @@ function GroupDetailsContent() {
   const captureRef = useRef<HTMLDivElement>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [previewImageFile, setPreviewImageFile] = useState<File | null>(null);
+  const [canSharePreviewImage, setCanSharePreviewImage] = useState(false);
+  const [isSharingPreviewImage, setIsSharingPreviewImage] = useState(false);
 
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [activeMember, setActiveMember] = useState<Member | null>(null);
@@ -465,6 +468,23 @@ function GroupDetailsContent() {
         backgroundColor: document.documentElement.classList.contains('dark') ? '#000000' : '#f9fafb',
         cacheBust: true
       });
+      const imageBlob = await fetch(dataUrl).then((response) => response.blob());
+      const generatedAt = new Date().toLocaleString('zh-CN', { hour12: false }).replace(/[\/\s:]/g, '');
+      const imageFile = new File(
+        [imageBlob],
+        `countbottle-${group?.name || 'group'}-${generatedAt}.png`,
+        { type: "image/png" }
+      );
+      let supportsFileSharing = false;
+      if (typeof navigator.share === "function" && typeof navigator.canShare === "function") {
+        try {
+          supportsFileSharing = navigator.canShare({ files: [imageFile] });
+        } catch {
+          supportsFileSharing = false;
+        }
+      }
+      setPreviewImageFile(imageFile);
+      setCanSharePreviewImage(supportsFileSharing);
       setPreviewImage(dataUrl);
     } catch (err: any) {
       console.error(err);
@@ -472,6 +492,32 @@ function GroupDetailsContent() {
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const handleSharePreviewImage = async () => {
+    if (!previewImageFile || !canSharePreviewImage || isSharingPreviewImage) return;
+    setIsSharingPreviewImage(true);
+    try {
+      await navigator.share({
+        files: [previewImageFile],
+        title: `${group?.name || "群组"}排行榜长图`,
+        text: "来自 CountBottle 小聚记账的群组长图"
+      });
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        console.error("Failed to share image:", error);
+        alert("调用系统分享失败，请使用下载长图。");
+      }
+    } finally {
+      setIsSharingPreviewImage(false);
+    }
+  };
+
+  const closePreviewImage = () => {
+    setPreviewImage(null);
+    setPreviewImageFile(null);
+    setCanSharePreviewImage(false);
+    setIsSharingPreviewImage(false);
   };
 
   const handleQuickAdd = async (memberId: string, e: React.MouseEvent) => {
@@ -929,18 +975,31 @@ function GroupDetailsContent() {
           </div>
         )}
       </Modal>
-      <Modal isOpen={!!previewImage} onClose={() => setPreviewImage(null)} title="排行榜长图">
+      <Modal isOpen={!!previewImage} onClose={closePreviewImage} title="排行榜长图">
         <div className="flex flex-col items-center gap-4">
-          <p className="text-sm text-gray-500 text-center">长按图片（手机）、右键（电脑）或点击下方按钮下载</p>
+          <p className="text-sm text-gray-500 text-center">
+            {canSharePreviewImage ? "可直接调用手机系统分享，也可以下载图片" : "长按图片（手机）、右键（电脑）或点击下方按钮下载"}
+          </p>
           <div className="max-h-[60vh] overflow-y-auto w-full flex justify-center rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-black p-2">
             {previewImage && <img src={previewImage} alt="群组长图" className="max-w-full h-auto rounded-lg shadow-sm" style={{ objectFit: 'contain' }} />}
           </div>
-          <div className="flex gap-3 w-full">
-            <button onClick={() => setPreviewImage(null)} className="flex-1 py-3 rounded-xl bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-white font-bold hover:bg-gray-300 dark:hover:bg-gray-700 transition-colors">
+          <div className="grid w-full grid-cols-2 gap-3">
+            {canSharePreviewImage && (
+              <button
+                type="button"
+                onClick={() => void handleSharePreviewImage()}
+                disabled={isSharingPreviewImage}
+                className="order-first col-span-2 flex items-center justify-center gap-2 rounded-xl bg-primary py-3 font-bold text-white shadow-lg shadow-primary/30 transition-colors hover:bg-primary/90 disabled:cursor-wait disabled:opacity-60"
+              >
+                <Share2 className="h-5 w-5" aria-hidden="true" />
+                {isSharingPreviewImage ? "正在打开分享..." : "分享图片"}
+              </button>
+            )}
+            <button onClick={closePreviewImage} className="py-3 rounded-xl bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-white font-bold hover:bg-gray-300 dark:hover:bg-gray-700 transition-colors">
               关闭
             </button>
-            <a href={previewImage || "#"} download={`countbottle-${group?.name || 'group'}-${new Date().toLocaleString('zh-CN', {hour12:false}).replace(/[\/\s:]/g, '')}.png`} className="flex-[2] flex justify-center items-center gap-2 py-3 rounded-xl bg-primary text-white font-bold hover:bg-primary/90 transition-colors shadow-lg shadow-primary/30">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            <a href={previewImage || "#"} download={previewImageFile?.name || "countbottle-group.png"} className={`flex items-center justify-center gap-2 rounded-xl py-3 font-bold transition-colors ${canSharePreviewImage ? "bg-gray-900 text-white hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100" : "bg-primary text-white shadow-lg shadow-primary/30 hover:bg-primary/90"}`}>
+              <Download className="h-5 w-5" aria-hidden="true" />
               下载长图
             </a>
           </div>

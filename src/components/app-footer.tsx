@@ -3,13 +3,12 @@
 import { useState } from "react";
 import { Modal } from "@/components/ui/modal";
 
-const VERSION = "1.4.1";
+const VERSION = "1.4.2";
 
 const releaseNotes = [
-  "群组统计新增近 7 天新增最多与核销最多人员。",
-  "冠军卡片默认展示第一名，点击可查看前三名领奖台。",
-  "排行榜采用按需快照查询，不进行定时轮询或实时监听。",
-  "群组长图自动隐藏当前数量为 0 的成员。"
+  "群组长图新增移动端原生分享功能。",
+  "支持分享文件的 iOS、Android 浏览器可直接打开系统分享面板。",
+  "不支持原生分享的浏览器继续保留图片下载方式。"
 ];
 
 export function AppFooter() {
