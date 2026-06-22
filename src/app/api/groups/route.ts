@@ -22,13 +22,19 @@ export async function GET() {
       const groupSnap = await adminDb.collection("Groups").doc(memberData.groupId).get();
       if (groupSnap.exists) {
         const groupData = groupSnap.data() || {};
+        const creatorId = groupData.creatorId || groupData.createdBy;
+        const role = creatorId === user.uid
+          ? "OWNER"
+          : ["OWNER", "ADMIN", "SUB_ADMIN"].includes(memberData.role)
+            ? "SUB_ADMIN"
+            : "MEMBER";
         groupsData.push({
           id: groupSnap.id,
           ...groupData,
-          creatorId: groupData.creatorId || groupData.createdBy,
+          creatorId,
           unit: groupData.unit || groupData.currency || "瓶",
           myBalance: memberData.balance,
-          role: memberData.role
+          role
         });
       }
     }
@@ -65,7 +71,7 @@ export async function POST(request: Request) {
     await memberRef.set({
       groupId: groupRef.id,
       userId: user.uid,
-      role: "ADMIN",
+      role: "OWNER",
       remarkName: user.name || user.email?.split("@")[0] || "群主",
       balance: 0,
       totalAdded: 0,

@@ -130,7 +130,11 @@ export default function AdminPage() {
       // Update local state
       setSelectedGroup(prev => prev ? { ...prev, creatorId: member.userId! } : null);
       setGroups(prev => prev.map(g => g.id === selectedGroup.id ? { ...g, creatorId: member.userId! } : g));
-      setGroupMembers(prev => prev.map(m => m.id === member.id ? { ...m, role: "ADMIN" } : m));
+      setGroupMembers(prev => prev.map(m => {
+        if (m.id === member.id) return { ...m, role: "OWNER" };
+        if (m.userId === selectedGroup.creatorId) return { ...m, role: "SUB_ADMIN" };
+        return m;
+      }));
       
       alert("移交成功！");
     } catch (err) {
@@ -148,8 +152,9 @@ export default function AdminPage() {
       return;
     }
 
-    const newRole = member.role === "ADMIN" ? "MEMBER" : "ADMIN";
-    if (!confirm(`确认将「${member.remarkName}」的权限修改为 ${newRole === 'ADMIN' ? '管理员' : '普通成员'} 吗？`)) return;
+    const isSubAdmin = ["ADMIN", "SUB_ADMIN"].includes(member.role);
+    const newRole = isSubAdmin ? "MEMBER" : "SUB_ADMIN";
+    if (!confirm(`确认将「${member.remarkName}」的权限修改为 ${newRole === 'SUB_ADMIN' ? '子管理员' : '普通成员'} 吗？`)) return;
 
     setIsActionLoading(true);
     try {
@@ -325,7 +330,7 @@ export default function AdminPage() {
                           <div className="flex items-center gap-2">
                             <h5 className="font-bold text-gray-900 dark:text-white">{member.remarkName}</h5>
                             {isCreator && <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-orange-500 text-white">群主</span>}
-                            {!isCreator && member.role === "ADMIN" && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">副管</span>}
+                            {!isCreator && ["ADMIN", "SUB_ADMIN", "OWNER"].includes(member.role) && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">子管理员</span>}
                           </div>
                           <p className="text-xs text-gray-500 mt-1">
                             {member.userId ? (member.displayName ? `绑: ${member.displayName}` : "已绑定真实用户") : "空白卡片(未认领)"} 
@@ -338,9 +343,9 @@ export default function AdminPage() {
                             <button
                               onClick={() => handleToggleAdmin(member)}
                               disabled={isActionLoading}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 ${member.role === 'ADMIN' ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700' : 'bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/40'}`}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 ${["ADMIN", "SUB_ADMIN"].includes(member.role) ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700' : 'bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/40'}`}
                             >
-                              {member.role === 'ADMIN' ? '取消副管' : '设为副管'}
+                              {["ADMIN", "SUB_ADMIN"].includes(member.role) ? '取消子管理员' : '设为子管理员'}
                             </button>
                           )}
                           <button

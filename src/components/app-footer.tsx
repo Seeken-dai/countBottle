@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Modal } from "@/components/ui/modal";
 
-const VERSION = "1.3.11";
+const VERSION = "1.4.0";
 
 const releaseNotes = [
   "成员记账流水改为每批 30 条，滚动到底部自动加载后续记录。",

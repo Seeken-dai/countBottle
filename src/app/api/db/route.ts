@@ -85,13 +85,30 @@ async function isSuperAdmin(uid: string) {
   return snap.exists;
 }
 
+function getGroupCreatorId(group: Record<string, unknown> | undefined) {
+  const creatorId = group?.creatorId;
+  if (typeof creatorId === "string" && creatorId) return creatorId;
+  const createdBy = group?.createdBy;
+  return typeof createdBy === "string" && createdBy ? createdBy : null;
+}
+
+async function isGroupOwner(groupId: string, uid: string) {
+  if (!groupId || !uid) return false;
+  const groupSnap = await adminDb.collection("Groups").doc(groupId).get();
+  return groupSnap.exists && getGroupCreatorId(groupSnap.data()) === uid;
+}
+
+async function canManageOwnerOnly(groupId: string, uid: string) {
+  return await isGroupOwner(groupId, uid) || await isSuperAdmin(uid);
+}
+
 async function canManageGroup(groupId: string, uid: string) {
   if (!groupId || !uid) return false;
   if (await isSuperAdmin(uid)) return true;
 
   const groupSnap = await adminDb.collection("Groups").doc(groupId).get();
   const group = groupSnap.data();
-  if (group?.creatorId === uid || group?.createdBy === uid) return true;
+  if (getGroupCreatorId(group) === uid) return true;
 
   const memberSnap = await adminDb
     .collection("Members")
@@ -120,7 +137,7 @@ function getMemberDisplayName(member: any, fallback = "成员") {
 
 function getRoleDisplayName(role: string) {
   if (role === "SUB_ADMIN") return "子管理员";
-  if (role === "ADMIN" || role === "OWNER") return "管理员";
+  if (role === "ADMIN" || role === "OWNER") return "子管理员";
   return "普通成员";
 }
 
@@ -322,7 +339,7 @@ export async function POST(request: Request) {
       const groupSnap = await adminDb.collection("Groups").doc(docId).get();
       if (!groupSnap.exists) return NextResponse.json({ error: "Group not found" }, { status: 404 });
       const group = groupSnap.data();
-      const ownsGroup = group?.creatorId === user.uid || group?.createdBy === user.uid;
+      const ownsGroup = getGroupCreatorId(group) === user.uid;
       if (!ownsGroup && !(await isSuperAdmin(user.uid))) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
@@ -343,9 +360,33 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
       const { memberId, newCreatorId } = data || {};
+      if (typeof docId !== "string" || !docId || typeof memberId !== "string" || !memberId
+        || typeof newCreatorId !== "string" || !newCreatorId) {
+        return NextResponse.json({ error: "Invalid transfer request" }, { status: 400 });
+      }
+      const groupSnap = await adminDb.collection("Groups").doc(docId).get();
+      if (!groupSnap.exists) return NextResponse.json({ error: "Group not found" }, { status: 404 });
+      const previousCreatorId = getGroupCreatorId(groupSnap.data());
+      if (previousCreatorId === newCreatorId) {
+        return NextResponse.json({ error: "User is already the group owner" }, { status: 409 });
+      }
+      const memberRef = adminDb.collection("Members").doc(memberId);
+      const memberSnap = await memberRef.get();
+      const member = memberSnap.data();
+      if (!memberSnap.exists || member?.groupId !== docId || member?.userId !== newCreatorId) {
+        return NextResponse.json({ error: "The new owner must be a claimed member of this group" }, { status: 400 });
+      }
+      const previousOwnerMembers = previousCreatorId
+        ? await adminDb.collection("Members").where("groupId", "==", docId).where("userId", "==", previousCreatorId).get()
+        : null;
       const batch = adminDb.batch();
       batch.update(adminDb.collection("Groups").doc(docId), { creatorId: newCreatorId, updatedAt: FieldValue.serverTimestamp() });
-      batch.update(adminDb.collection("Members").doc(memberId), { role: "ADMIN", updatedAt: FieldValue.serverTimestamp() });
+      batch.update(memberRef, { role: "OWNER", updatedAt: FieldValue.serverTimestamp() });
+      previousOwnerMembers?.docs.forEach((ownerMember) => {
+        if (ownerMember.id !== memberId) {
+          batch.update(ownerMember.ref, { role: "SUB_ADMIN", updatedAt: FieldValue.serverTimestamp() });
+        }
+      });
       await batch.commit();
       await writeAuditLog({
         groupId: docId,
@@ -354,11 +395,11 @@ export async function POST(request: Request) {
         targetType: "member",
         targetId: memberId,
         summary: "超管移交群主",
-        metadata: { newCreatorId },
+        metadata: { previousCreatorId, newCreatorId },
         actorName,
-        targetName: newCreatorId,
+        targetName: getMemberDisplayName(member, newCreatorId),
         displayTitle: `${actorName}移交了群主身份`,
-        displayDetail: "群组创建人已更新，原群主权限同步调整为管理员。"
+        displayDetail: "现任群主已更新，原群主权限同步调整为子管理员。"
       });
       return NextResponse.json({ success: true });
     }
@@ -395,7 +436,7 @@ export async function POST(request: Request) {
     }
     else if (action === "updateGroupBasic") {
       const { groupId, name, unit, announcement } = data || {};
-      if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      if (!(await canManageOwnerOnly(groupId, user.uid))) return NextResponse.json({ error: "仅群主可执行此操作" }, { status: 403 });
       await adminDb.collection("Groups").doc(groupId).update({
         name: String(name || "").trim(),
         unit: String(unit || "").trim(),
@@ -438,7 +479,7 @@ export async function POST(request: Request) {
     }
     else if (action === "updateGroupInterest") {
       const { groupId, interestConfig } = data || {};
-      if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      if (!(await canManageOwnerOnly(groupId, user.uid))) return NextResponse.json({ error: "仅群主可执行此操作" }, { status: 403 });
       const isEnabled = interestConfig?.type !== "none" && interestConfig?.frequency !== "none";
       const nextInterestDate = isEnabled ? parseFirestoreDate(interestConfig?.nextInterestAt) : null;
       const currentMinute = new Date();
@@ -477,9 +518,19 @@ export async function POST(request: Request) {
     }
     else if (action === "updateMemberRole") {
       const { groupId, memberId, role } = data || {};
-      if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      if (!["MEMBER", "ADMIN", "SUB_ADMIN"].includes(role)) return NextResponse.json({ error: "Invalid role" }, { status: 400 });
+      const actorIsSuperAdmin = await isSuperAdmin(user.uid);
+      const actorIsOwner = await isGroupOwner(groupId, user.uid);
+      if (!actorIsOwner && !actorIsSuperAdmin) return NextResponse.json({ error: "只有群主可以任免子管理员" }, { status: 403 });
+      const allowedRoles = actorIsSuperAdmin ? ["MEMBER", "ADMIN", "SUB_ADMIN"] : ["MEMBER", "SUB_ADMIN"];
+      if (!allowedRoles.includes(role)) return NextResponse.json({ error: "Invalid role" }, { status: 400 });
       const memberSnap = await adminDb.collection("Members").doc(memberId).get();
+      if (!memberSnap.exists || memberSnap.data()?.groupId !== groupId) {
+        return NextResponse.json({ error: "Member not found in this group" }, { status: 404 });
+      }
+      const groupSnap = await adminDb.collection("Groups").doc(groupId).get();
+      if (memberSnap.data()?.userId === getGroupCreatorId(groupSnap.data())) {
+        return NextResponse.json({ error: "不能修改群主角色，请先移交群主" }, { status: 409 });
+      }
       const memberName = getMemberDisplayName(memberSnap.data());
       await adminDb.collection("Members").doc(memberId).update({
         role,
@@ -526,7 +577,7 @@ export async function POST(request: Request) {
     }
     else if (action === "unbindMember") {
       const { groupId, memberId } = data || {};
-      if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      if (!(await canManageOwnerOnly(groupId, user.uid))) return NextResponse.json({ error: "仅群主可执行此操作" }, { status: 403 });
       const memberSnap = await adminDb.collection("Members").doc(memberId).get();
       const memberName = getMemberDisplayName(memberSnap.data());
       await adminDb.collection("Members").doc(memberId).update({
@@ -549,7 +600,7 @@ export async function POST(request: Request) {
     }
     else if (action === "deleteMember") {
       const { groupId, memberId } = data || {};
-      if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      if (!(await canManageOwnerOnly(groupId, user.uid))) return NextResponse.json({ error: "仅群主可执行此操作" }, { status: 403 });
       const memberSnap = await adminDb.collection("Members").doc(memberId).get();
       const memberName = getMemberDisplayName(memberSnap.data());
       await adminDb.collection("Members").doc(memberId).delete();

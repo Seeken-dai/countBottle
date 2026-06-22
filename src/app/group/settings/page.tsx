@@ -233,6 +233,7 @@ function GroupSettingsContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isCreator, setIsCreator] = useState(false);
+  const [groupCreatorId, setGroupCreatorId] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
   const [groupName, setGroupName] = useState("");
@@ -338,6 +339,7 @@ function GroupSettingsContent() {
         }
         setIsAdmin(true);
         setIsCreator(creatorId === user.uid);
+        setGroupCreatorId(creatorId || "");
         setGroupName(data.name || "");
         setGroupUnit(data.unit || "瓶");
         setAnnouncementText(data.announcement || "");
@@ -549,7 +551,7 @@ function GroupSettingsContent() {
       <main className="max-w-2xl mx-auto px-4 sm:px-6 py-8 space-y-8">
         
         {/* Basic Settings */}
-        <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm">
+        {isCreator && <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm">
             <h2 className="text-xl font-extrabold text-gray-900 dark:text-white mb-6 flex items-center">
             <span className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center mr-3">⚙️</span>
             基础设置
@@ -572,10 +574,10 @@ function GroupSettingsContent() {
               保存基础设置
             </button>
           </form>
-        </section>
+        </section>}
 
         {/* Sub-Admin Settings */}
-        <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm">
+        {isCreator && <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm">
           <h2 className="text-xl font-extrabold text-gray-900 dark:text-white mb-6 flex items-center">
             <span className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center mr-3">🛡️</span>
             子管理员配置
@@ -593,8 +595,12 @@ function GroupSettingsContent() {
                       {m.remarkName.charAt(0).toUpperCase()}
                     </div>
                     <div>
-                      <h4 className="font-bold text-gray-900 dark:text-white">{m.remarkName}</h4>
-                      <p className="text-xs text-gray-500 mt-0.5">{m.role === "SUB_ADMIN" ? "子管理员" : "普通成员"}</p>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-gray-900 dark:text-white">{m.remarkName}</h4>
+                        {m.userId === groupCreatorId && <span className="px-1.5 py-0.5 rounded-md text-[10px] font-black bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">群主</span>}
+                        {m.userId !== groupCreatorId && ["OWNER", "ADMIN", "SUB_ADMIN"].includes(m.role) && <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">子管理员</span>}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5">{m.userId === groupCreatorId ? "群主" : ["OWNER", "ADMIN", "SUB_ADMIN"].includes(m.role) ? "子管理员" : "普通成员"}</p>
                     </div>
                   </div>
                   <button 
@@ -611,7 +617,7 @@ function GroupSettingsContent() {
               ))
             )}
           </div>
-        </section>
+        </section>}
 
         {/* Claim Approval */}
         <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm">
@@ -736,7 +742,7 @@ function GroupSettingsContent() {
         </section>
 
         {/* Interest Settings */}
-        <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm relative overflow-hidden">
+        {isCreator && <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm relative overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl" />
           <h2 className="text-xl font-extrabold text-gray-900 dark:text-white mb-6 flex items-center relative z-10">
             <span className="w-8 h-8 rounded-lg bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 flex items-center justify-center mr-3">📈</span>
@@ -807,7 +813,7 @@ function GroupSettingsContent() {
               保存计息规则
             </button>
           </form>
-        </section>
+        </section>}
 
         {/* Danger Zone */}
         {isCreator && <section className="bg-red-50/50 dark:bg-red-900/10 rounded-3xl p-6 md:p-8 border border-red-100 dark:border-red-900/30">
