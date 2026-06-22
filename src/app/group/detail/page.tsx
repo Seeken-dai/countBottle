@@ -10,6 +10,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Modal } from "@/components/ui/modal";
 import Link from "next/link";
 import { motion, AnimatePresence, useSpring, useTransform } from "framer-motion";
+import { ArrowDownRight, ArrowUpRight, RotateCcw, Trophy } from "lucide-react";
 import { Suspense } from "react";
 
 function AnimatedNumber({ value }: { value: number }) {
@@ -71,6 +72,22 @@ interface ClaimRequest {
   status: "PENDING" | "APPROVED" | "REJECTED";
 }
 
+interface RankingEntry {
+  memberId: string;
+  name: string;
+  amount: number;
+  lastActivityAt: string;
+}
+
+interface WeeklyRankings {
+  from: string;
+  to: string;
+  add: RankingEntry[];
+  deduct: RankingEntry[];
+}
+
+type RankingType = "add" | "deduct";
+
 type SortOption = "time" | "name" | "balance";
 
 function getTimeValue(value: any) {
@@ -80,6 +97,39 @@ function getTimeValue(value: any) {
   if (typeof value.seconds === "number") return value.seconds * 1000;
   if (typeof value._seconds === "number") return value._seconds * 1000;
   return 0;
+}
+
+function RankingPodium({ entries, unit }: { entries: RankingEntry[]; unit: string }) {
+  const slots = [entries[1], entries[0], entries[2]];
+  const ranks = [2, 1, 3];
+  const heights = ["h-20 sm:h-24", "h-28 sm:h-32", "h-16 sm:h-20"];
+  const tones = [
+    "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300",
+    "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
+    "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300"
+  ];
+
+  return (
+    <div className="grid grid-cols-3 items-end gap-2 sm:gap-3 pt-5" aria-label="近 7 天前三名">
+      {slots.map((entry, index) => entry ? (
+        <div key={entry.memberId} className="flex min-w-0 flex-col items-center text-center">
+          <div className={`mb-2 flex h-9 w-9 items-center justify-center rounded-full text-sm font-black ${tones[index]}`}>
+            {ranks[index]}
+          </div>
+          <div className="mb-2 w-full truncate px-1 text-sm font-bold text-gray-900 dark:text-white" title={entry.name}>
+            {entry.name}
+          </div>
+          <div className={`flex w-full flex-col items-center justify-center rounded-t-xl border border-b-0 border-gray-200 bg-gray-50 px-1 dark:border-gray-700 dark:bg-gray-800/70 ${heights[index]}`}>
+            {ranks[index] === 1 && <Trophy className="mb-1 h-5 w-5 text-amber-500" aria-hidden="true" />}
+            <span className="max-w-full truncate text-base font-black tabular-nums text-gray-900 dark:text-white">
+              {entry.amount}
+            </span>
+            <span className="text-[10px] text-gray-500 dark:text-gray-400">{unit}</span>
+          </div>
+        </div>
+      ) : <div key={ranks[index]} aria-hidden="true" />)}
+    </div>
+  );
 }
 
 function GroupDetailsContent() {
@@ -129,7 +179,42 @@ function GroupDetailsContent() {
   const memberRecordsCursorRef = useRef<string | null>(null);
   const memberRecordsLoadingRef = useRef(false);
 
+  const [weeklyRankings, setWeeklyRankings] = useState<WeeklyRankings | null>(null);
+  const [weeklyRankingLoading, setWeeklyRankingLoading] = useState(false);
+  const [weeklyRankingError, setWeeklyRankingError] = useState<string | null>(null);
+  const [activeRankingType, setActiveRankingType] = useState<RankingType | null>(null);
+  const weeklyRankingLoadedGroupRef = useRef<string | null>(null);
+  const weeklyRankingRequestRef = useRef(0);
+
   const memberRecordsRequestRef = useRef(0);
+
+  const loadWeeklyRankings = useCallback(async () => {
+    if (!groupId) return;
+    const requestId = ++weeklyRankingRequestRef.current;
+    setWeeklyRankingLoading(true);
+    setWeeklyRankingError(null);
+    try {
+      const result = await proxyRequest({
+        action: "getWeeklyMemberRankings",
+        data: { groupId }
+      }) as WeeklyRankings;
+      if (requestId === weeklyRankingRequestRef.current) setWeeklyRankings(result);
+    } catch (error) {
+      if (requestId === weeklyRankingRequestRef.current) {
+        setWeeklyRankingError(error instanceof Error ? error.message : "排行榜加载失败");
+      }
+    } finally {
+      if (requestId === weeklyRankingRequestRef.current) setWeeklyRankingLoading(false);
+    }
+  }, [groupId]);
+
+  useEffect(() => {
+    if (!groupId || weeklyRankingLoadedGroupRef.current === groupId) return;
+    weeklyRankingLoadedGroupRef.current = groupId;
+    setWeeklyRankings(null);
+    void loadWeeklyRankings();
+  }, [groupId, loadWeeklyRankings]);
+
   // LAZY EVALUATION FOR INTEREST
   const triggerLazyInterest = async (groupData: Group) => {
     if (!groupData.interestConfig || groupData.interestConfig.type === "none" || groupData.interestConfig.frequency === "none" || !groupData.interestConfig.nextInterestAt) {
@@ -402,6 +487,7 @@ function GroupDetailsContent() {
     try {
       await proxyRequest({ action: "quickAddRecord", data: { groupId, memberId } });
       setRefreshToken((value) => value + 1);
+      void loadWeeklyRankings();
     } catch (err) { alert("操作失败"); }
   };
 
@@ -428,6 +514,9 @@ function GroupDetailsContent() {
       setRecordAmount("");
       setRecordNote("");
       setSelectedMemberId(null);
+      if (recordActionType === "ADD" || recordActionType === "DEDUCT") {
+        void loadWeeklyRankings();
+      }
     } catch (err: any) { alert(err.message || "操作失败"); } 
     finally { setIsActionLoading(false); }
   };
@@ -554,6 +643,60 @@ function GroupDetailsContent() {
                 <div className="text-2xl font-black text-gray-900 dark:text-white"><AnimatedNumber value={cumulativeTotal} /> <span className="text-sm font-medium text-gray-500 dark:text-white/70">{group.unit}</span></div>
               </div>
             </div>
+
+            {!!weeklyRankings && (weeklyRankings.add.length > 0 || weeklyRankings.deduct.length > 0) && (
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {weeklyRankings.add[0] && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveRankingType("add")}
+                    className="group flex min-w-0 items-center justify-between rounded-xl border border-gray-200 bg-gray-50 p-4 text-left transition-all hover:border-emerald-300 hover:bg-emerald-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:border-white/10 dark:bg-white/5 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/20"
+                    aria-label={`查看近 7 天新增排行榜，第一名 ${weeklyRankings.add[0].name}`}
+                  >
+                    <div className="min-w-0">
+                      <div className="mb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-white/70">
+                        <ArrowUpRight className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+                        近 7 天新增最多
+                      </div>
+                      <div className="truncate text-base font-black text-gray-900 dark:text-white">{weeklyRankings.add[0].name}</div>
+                    </div>
+                    <div className="ml-3 shrink-0 text-right">
+                      <div className="text-2xl font-black tabular-nums text-emerald-600 dark:text-emerald-400">{weeklyRankings.add[0].amount}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">{group.unit} · 查看前三</div>
+                    </div>
+                  </button>
+                )}
+                {weeklyRankings.deduct[0] && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveRankingType("deduct")}
+                    className="group flex min-w-0 items-center justify-between rounded-xl border border-gray-200 bg-gray-50 p-4 text-left transition-all hover:border-orange-300 hover:bg-orange-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 dark:border-white/10 dark:bg-white/5 dark:hover:border-orange-700 dark:hover:bg-orange-950/20"
+                    aria-label={`查看近 7 天核销排行榜，第一名 ${weeklyRankings.deduct[0].name}`}
+                  >
+                    <div className="min-w-0">
+                      <div className="mb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-white/70">
+                        <ArrowDownRight className="h-3.5 w-3.5 text-orange-500" aria-hidden="true" />
+                        近 7 天核销最多
+                      </div>
+                      <div className="truncate text-base font-black text-gray-900 dark:text-white">{weeklyRankings.deduct[0].name}</div>
+                    </div>
+                    <div className="ml-3 shrink-0 text-right">
+                      <div className="text-2xl font-black tabular-nums text-orange-600 dark:text-orange-400">{weeklyRankings.deduct[0].amount}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">{group.unit} · 查看前三</div>
+                    </div>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {weeklyRankingError && !weeklyRankingLoading && (
+              <div className="mt-3 flex items-center justify-between gap-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-950/20 dark:text-red-300">
+                <span>近 7 天排行暂时加载失败</span>
+                <button type="button" onClick={() => void loadWeeklyRankings()} className="inline-flex items-center gap-1 font-bold hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500">
+                  <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />重试
+                </button>
+              </div>
+            )}
             
             <div className="mt-8 flex flex-wrap items-center gap-4 text-sm opacity-90">
               <div className="flex items-center gap-2 bg-gray-100 dark:bg-black/20 px-3 py-1.5 rounded-lg text-gray-700 dark:text-white">
@@ -773,6 +916,19 @@ function GroupDetailsContent() {
           </div>
         )}
       </Modal>
+      <Modal
+        isOpen={activeRankingType !== null}
+        onClose={() => setActiveRankingType(null)}
+        title={activeRankingType === "deduct" ? "近 7 天核销排行榜" : "近 7 天新增排行榜"}
+        maxWidth="lg"
+      >
+        {activeRankingType && weeklyRankings && (
+          <div>
+            <p className="text-sm text-gray-500 dark:text-gray-400">含今天在内的 7 个自然日，按数量合计排名</p>
+            <RankingPodium entries={weeklyRankings[activeRankingType]} unit={group.unit} />
+          </div>
+        )}
+      </Modal>
       <Modal isOpen={!!previewImage} onClose={() => setPreviewImage(null)} title="排行榜长图">
         <div className="flex flex-col items-center gap-4">
           <p className="text-sm text-gray-500 text-center">长按图片（手机）、右键（电脑）或点击下方按钮下载</p>
@@ -810,7 +966,7 @@ function GroupDetailsContent() {
           </div>
 
           <div className="flex flex-col gap-3">
-            {sortedMembers.map((member, index) => (
+            {sortedMembers.filter((member) => Number(member.balance) !== 0).map((member, index) => (
               <div key={member.id} className="bg-white dark:bg-gray-900 rounded-xl p-3 shadow-sm border border-gray-100 dark:border-gray-800 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center font-bold text-gray-500 dark:text-gray-400 overflow-hidden shrink-0">

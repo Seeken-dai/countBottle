@@ -120,6 +120,34 @@ async function canManageGroup(groupId: string, uid: string) {
   return role === "OWNER" || role === "ADMIN" || role === "SUB_ADMIN";
 }
 
+async function canViewGroup(groupId: string, uid: string) {
+  if (!groupId || !uid) return false;
+  if (await isSuperAdmin(uid)) return true;
+
+  const groupSnap = await adminDb.collection("Groups").doc(groupId).get();
+  if (!groupSnap.exists) return false;
+  if (getGroupCreatorId(groupSnap.data()) === uid) return true;
+
+  const memberSnap = await adminDb
+    .collection("Members")
+    .where("groupId", "==", groupId)
+    .where("userId", "==", uid)
+    .limit(1)
+    .get();
+  return !memberSnap.empty;
+}
+
+function getShanghaiSevenDayWindow(now = new Date()) {
+  const shanghaiOffsetMs = 8 * 60 * 60 * 1000;
+  const shanghaiNow = new Date(now.getTime() + shanghaiOffsetMs);
+  const startAt = new Date(Date.UTC(
+    shanghaiNow.getUTCFullYear(),
+    shanghaiNow.getUTCMonth(),
+    shanghaiNow.getUTCDate() - 6
+  ) - shanghaiOffsetMs);
+  return { startAt, endAt: now };
+}
+
 function getUserDisplayName(user: { name?: string | null; email?: string | null }, fallback = "用户") {
   const name = typeof user.name === "string" ? user.name.trim() : "";
   if (name) return name;
@@ -203,7 +231,70 @@ export async function POST(request: Request) {
     const { action, collection, docId, data, where, orderBy, limit, cursor } = body;
     const actorName = getUserDisplayName(user);
 
-    if (action === "query" || action === "queryPage") {
+    if (action === "getWeeklyMemberRankings") {
+      const groupId = typeof data?.groupId === "string" ? data.groupId.trim() : "";
+      if (!groupId) return NextResponse.json({ error: "Invalid group" }, { status: 400 });
+      if (!(await canViewGroup(groupId, user.uid))) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+
+      const { startAt, endAt } = getShanghaiSevenDayWindow();
+      const recordsRef = adminDb.collection("Records");
+      const [membersSnap, addSnap, deductSnap] = await Promise.all([
+        adminDb.collection("Members").where("groupId", "==", groupId).get(),
+        recordsRef
+          .where("groupId", "==", groupId)
+          .where("type", "==", "ADD")
+          .where("createdAt", ">=", startAt)
+          .orderBy("createdAt", "desc")
+          .get(),
+        recordsRef
+          .where("groupId", "==", groupId)
+          .where("type", "==", "DEDUCT")
+          .where("createdAt", ">=", startAt)
+          .orderBy("createdAt", "desc")
+          .get()
+      ]);
+
+      const memberNames = new Map(
+        membersSnap.docs.map((memberDoc) => [memberDoc.id, getMemberDisplayName(memberDoc.data())])
+      );
+      const buildRanking = (docs: typeof addSnap.docs) => {
+        const totals = new Map<string, { amount: number; lastActivityAt: Date }>();
+        for (const recordDoc of docs) {
+          const record = recordDoc.data();
+          const memberId = typeof record.memberId === "string" ? record.memberId : "";
+          const memberName = memberNames.get(memberId);
+          const amount = Number(record.amount);
+          const createdAt = parseFirestoreDate(record.createdAt);
+          if (!memberName || !Number.isFinite(amount) || amount <= 0 || !createdAt) continue;
+          const current = totals.get(memberId);
+          totals.set(memberId, {
+            amount: (current?.amount || 0) + amount,
+            lastActivityAt: current?.lastActivityAt || createdAt
+          });
+        }
+        return Array.from(totals.entries())
+          .map(([memberId, total]) => ({
+            memberId,
+            name: memberNames.get(memberId) || "成员",
+            amount: total.amount,
+            lastActivityAt: total.lastActivityAt.toISOString()
+          }))
+          .sort((a, b) => b.amount - a.amount
+            || new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime()
+            || a.memberId.localeCompare(b.memberId))
+          .slice(0, 3);
+      };
+
+      return NextResponse.json({
+        from: startAt.toISOString(),
+        to: endAt.toISOString(),
+        add: buildRanking(addSnap.docs),
+        deduct: buildRanking(deductSnap.docs)
+      });
+    }
+    else if (action === "query" || action === "queryPage") {
       const isPagedQuery = action === "queryPage";
       const allowedFields = ALLOWED_QUERY_FIELDS[collection];
       const clauses = parseWhereClauses(where);
