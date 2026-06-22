@@ -8,6 +8,7 @@ import { Modal } from "@/components/ui/modal";
 import { AppFooter } from "@/components/app-footer";
 import Link from "next/link";
 import useSWR from 'swr';
+import { getBalanceView } from "@/lib/balance-display";
 
 interface Group {
   id: string;
@@ -160,8 +161,9 @@ export default function DashboardPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {groups.map((group) => (
-              <div
+            {groups.map((group) => {
+              const balanceView = getBalanceView(group.myBalance);
+              return <div
                 key={group.id}
                 onClick={() => navigateToGroup(group.id)}
                 className="group relative bg-white dark:bg-gray-900 rounded-3xl p-6 border border-gray-200 dark:border-gray-800 shadow-sm hover:shadow-xl hover:border-primary/50 dark:hover:border-primary/50 transition-all cursor-pointer overflow-hidden"
@@ -187,15 +189,16 @@ export default function DashboardPage() {
                 
                 <div className="flex items-end justify-between relative z-10 mt-6">
                   <div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">我的余额</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">我的欠款</p>
                     <div className="flex items-baseline gap-1">
                       <span className="text-3xl font-black text-gray-900 dark:text-white leading-none">
-                        {group.myBalance}
+                        {balanceView.debt}
                       </span>
                       <span className="text-sm font-medium text-gray-500 dark:text-gray-400">
                         {group.unit}
                       </span>
                     </div>
+                    {balanceView.hasCredit && <p className="mt-2 text-xs font-bold text-emerald-600 dark:text-emerald-400">抵扣额度 {balanceView.credit} {group.unit}</p>}
                   </div>
                   <div className="w-10 h-10 rounded-full bg-gray-50 dark:bg-gray-800 flex items-center justify-center group-hover:bg-primary group-hover:text-white text-gray-400 transition-colors">
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -203,8 +206,8 @@ export default function DashboardPage() {
                     </svg>
                   </div>
                 </div>
-              </div>
-            ))}
+              </div>;
+            })}
 
             <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-3xl h-[180px] flex flex-col items-center justify-center gap-3 p-4">
               <button onClick={() => setIsCreateModalOpen(true)} className="w-full py-2 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-xl font-bold hover:bg-primary hover:text-white dark:hover:bg-primary transition-colors">

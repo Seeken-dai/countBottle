@@ -7,6 +7,12 @@ import { getDueInterestSchedule, normalizeInterestScheduleAnchor, type InterestF
 export const runtime = "nodejs";
 
 const MAX_QUERY_LIMIT = 500;
+type CreditBalanceStatus = "disabled" | "enabled" | "disabling";
+
+function getCreditBalanceStatus(group: Record<string, unknown> | undefined): CreditBalanceStatus {
+  const status = group?.creditBalanceStatus;
+  return status === "enabled" || status === "disabling" ? status : "disabled";
+}
 
 const ALLOWED_QUERY_FIELDS: Record<string, ReadonlySet<string>> = {
   Users: new Set(),
@@ -259,7 +265,10 @@ export async function POST(request: Request) {
           if (record.type !== type) continue;
           const memberId = typeof record.memberId === "string" ? record.memberId : "";
           const memberName = memberNames.get(memberId);
-          const amount = Number(record.amount);
+          const rawAmount = type === "DEDUCT"
+            ? (record.effectiveDebtDeducted ?? record.amount)
+            : record.amount;
+          const amount = Number(rawAmount);
           const createdAt = parseFirestoreDate(record.createdAt);
           if (!memberName || !Number.isFinite(amount) || amount <= 0 || !createdAt) continue;
           const current = totals.get(memberId);
@@ -542,6 +551,150 @@ export async function POST(request: Request) {
       });
       return NextResponse.json({ success: true });
     }
+    else if (action === "getCreditBalanceDisableImpact") {
+      const groupId = typeof data?.groupId === "string" ? data.groupId.trim() : "";
+      if (!groupId || !(await isGroupOwner(groupId, user.uid))) {
+        return NextResponse.json({ error: "只有群主可以修改抵扣额度设置" }, { status: 403 });
+      }
+      const membersSnap = await adminDb.collection("Members").where("groupId", "==", groupId).get();
+      let affectedMemberCount = 0;
+      let totalCredit = 0;
+      membersSnap.forEach((memberDoc) => {
+        const balance = Number(memberDoc.data()?.balance || 0);
+        if (balance < 0) {
+          affectedMemberCount += 1;
+          totalCredit += -balance;
+        }
+      });
+      return NextResponse.json({
+        affectedMemberCount,
+        totalCredit: Number(totalCredit.toFixed(2))
+      });
+    }
+    else if (action === "updateCreditBalanceStatus") {
+      const groupId = typeof data?.groupId === "string" ? data.groupId.trim() : "";
+      const nextStatus = data?.status;
+      if (!groupId || !["enabled", "disabled"].includes(nextStatus)) {
+        return NextResponse.json({ error: "无效的抵扣额度设置" }, { status: 400 });
+      }
+      if (!(await isGroupOwner(groupId, user.uid))) {
+        return NextResponse.json({ error: "只有群主可以修改抵扣额度设置" }, { status: 403 });
+      }
+
+      const groupRef = adminDb.collection("Groups").doc(groupId);
+      if (nextStatus === "enabled") {
+        await adminDb.runTransaction(async (transaction) => {
+          const groupDoc = await transaction.get(groupRef);
+          if (!groupDoc.exists) throw new Error("群组不存在");
+          if (getGroupCreatorId(groupDoc.data()) !== user.uid) throw new Error("只有群主可以修改抵扣额度设置");
+          if (getCreditBalanceStatus(groupDoc.data()) === "disabling") throw new Error("抵扣额度正在清理，请稍后重试");
+          transaction.update(groupRef, {
+            creditBalanceStatus: "enabled",
+            updatedAt: FieldValue.serverTimestamp()
+          });
+        });
+        await writeAuditLog({
+          groupId,
+          operatorId: user.uid,
+          type: "CREDIT_BALANCE_SETTING_UPDATED",
+          targetType: "group",
+          targetId: groupId,
+          summary: "开启超额核销",
+          actorName,
+          displayTitle: `${actorName}开启了超额核销`,
+          displayDetail: "核销超过当前欠款的部分将转为抵扣额度，用于抵扣未来新增债务。"
+        });
+        return NextResponse.json({ success: true, status: "enabled" });
+      }
+
+      await adminDb.runTransaction(async (transaction) => {
+        const groupDoc = await transaction.get(groupRef);
+        if (!groupDoc.exists) throw new Error("群组不存在");
+        if (getGroupCreatorId(groupDoc.data()) !== user.uid) throw new Error("只有群主可以修改抵扣额度设置");
+        transaction.update(groupRef, {
+          creditBalanceStatus: "disabling",
+          updatedAt: FieldValue.serverTimestamp()
+        });
+      });
+
+      const membersSnap = await adminDb.collection("Members").where("groupId", "==", groupId).get();
+      let clearedMemberCount = 0;
+      let clearedCreditTotal = 0;
+      for (const memberDoc of membersSnap.docs) {
+        const clearedCredit = await adminDb.runTransaction(async (transaction) => {
+          const freshMember = await transaction.get(memberDoc.ref);
+          if (!freshMember.exists) return 0;
+          const memberData = freshMember.data();
+          const beforeBalance = Number(memberData?.balance || 0);
+          if (beforeBalance >= 0) return 0;
+          const memberName = getMemberDisplayName(memberData);
+          const credit = -beforeBalance;
+          transaction.update(memberDoc.ref, {
+            balance: 0,
+            updatedAt: FieldValue.serverTimestamp()
+          });
+          transaction.set(adminDb.collection("Records").doc(), {
+            groupId,
+            memberId: memberDoc.id,
+            operatorId: user.uid,
+            type: "SET",
+            amount: 0,
+            balanceMode: "DEBT",
+            beforeBalance,
+            afterBalance: 0,
+            reason: "CREDIT_BALANCE_FEATURE_DISABLED",
+            note: "关闭超额核销时清理抵扣额度",
+            createdAt: FieldValue.serverTimestamp()
+          });
+          transaction.set(adminDb.collection("AuditLogs").doc(), {
+            groupId,
+            operatorId: user.uid,
+            type: "BALANCE_SET",
+            targetType: "member",
+            targetId: memberDoc.id,
+            summary: "关闭超额核销并清理抵扣额度",
+            metadata: { reason: "CREDIT_BALANCE_FEATURE_DISABLED", clearedCredit: credit },
+            actorName,
+            targetName: memberName,
+            amount: 0,
+            beforeBalance,
+            afterBalance: 0,
+            note: "关闭超额核销时清理抵扣额度",
+            displayTitle: `${actorName}清除了${memberName}的抵扣额度 ${credit}`,
+            displayDetail: `抵扣额度从 ${credit} 调整为 0`,
+            createdAt: FieldValue.serverTimestamp()
+          });
+          return credit;
+        });
+        if (clearedCredit > 0) {
+          clearedMemberCount += 1;
+          clearedCreditTotal += clearedCredit;
+        }
+      }
+
+      await groupRef.update({
+        creditBalanceStatus: "disabled",
+        updatedAt: FieldValue.serverTimestamp()
+      });
+      await writeAuditLog({
+        groupId,
+        operatorId: user.uid,
+        type: "CREDIT_BALANCE_SETTING_UPDATED",
+        targetType: "group",
+        targetId: groupId,
+        summary: "关闭超额核销",
+        metadata: { clearedMemberCount, clearedCreditTotal },
+        actorName,
+        displayTitle: `${actorName}关闭了超额核销`,
+        displayDetail: `已清理 ${clearedMemberCount} 名成员的抵扣额度，共 ${Number(clearedCreditTotal.toFixed(2))}`
+      });
+      return NextResponse.json({
+        success: true,
+        status: "disabled",
+        clearedMemberCount,
+        clearedCreditTotal: Number(clearedCreditTotal.toFixed(2))
+      });
+    }
     else if (action === "updateGroupClaimApproval") {
       const { groupId, requireClaimApproval } = data || {};
       if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -712,13 +865,17 @@ export async function POST(request: Request) {
       if (member?.groupId !== groupId) return NextResponse.json({ error: "Invalid member group" }, { status: 400 });
       if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       const memberName = getMemberDisplayName(member);
-      const beforeBalance = Number(member?.balance || 0);
-      const afterBalance = beforeBalance + 1;
+      let beforeBalance = 0;
+      let afterBalance = 0;
 
       const recordRef = adminDb.collection("Records").doc();
       await adminDb.runTransaction(async (transaction) => {
+        const freshMember = await transaction.get(memberRef);
+        if (!freshMember.exists) throw new Error("成员不存在");
+        beforeBalance = Number(freshMember.data()?.balance || 0);
+        afterBalance = beforeBalance + 1;
         transaction.update(memberRef, {
-          balance: FieldValue.increment(1),
+          balance: afterBalance,
           totalAdded: FieldValue.increment(1),
           updatedAt: FieldValue.serverTimestamp()
         });
@@ -728,6 +885,8 @@ export async function POST(request: Request) {
           operatorId: user.uid,
           type: "ADD",
           amount: 1,
+          beforeBalance,
+          afterBalance,
           note: "",
           createdAt: FieldValue.serverTimestamp()
         });
@@ -751,7 +910,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true });
     }
     else if (action === "submitRecord") {
-      const { memberId, groupId, recordActionType, amount, note } = data || {};
+      const { memberId, groupId, recordActionType, amount, note, balanceMode } = data || {};
+      if (!['ADD', 'DEDUCT', 'SET'].includes(recordActionType)
+        || !Number.isFinite(amount) || !Number.isInteger(amount)
+        || amount < 0 || (recordActionType !== "SET" && amount === 0)
+        || (recordActionType === "SET" && balanceMode != null && !["DEBT", "CREDIT"].includes(balanceMode))) {
+        return NextResponse.json({ error: "请输入有效的非负整数" }, { status: 400 });
+      }
       const memberRef = adminDb.collection("Members").doc(memberId);
       const memberSnap = await memberRef.get();
       if (!memberSnap.exists) return NextResponse.json({ error: "Member not found" }, { status: 404 });
@@ -770,9 +935,13 @@ export async function POST(request: Request) {
       const cleanedNote = typeof note === "string" ? note.trim().slice(0, 200) : "";
       let beforeBalance = 0;
       let afterBalance = 0;
+      let effectiveDebtDeducted = 0;
 
       await adminDb.runTransaction(async (transaction) => {
+        const groupRef = adminDb.collection("Groups").doc(groupId);
+        const groupDoc = await transaction.get(groupRef);
         const memberDoc = await transaction.get(memberRef);
+        if (!groupDoc.exists) throw new Error("群组不存在");
         if (!memberDoc.exists) throw new Error("成员不存在");
 
         const currentBalance = Number(memberDoc.data()?.balance || 0);
@@ -783,11 +952,18 @@ export async function POST(request: Request) {
           newBalance += amount;
           newTotalAdded += amount;
         } else if (recordActionType === "DEDUCT") {
+          effectiveDebtDeducted = Math.min(amount, Math.max(currentBalance, 0));
           newBalance -= amount;
-          if (newBalance < 0) throw new Error("余额不能为负数");
+          if (newBalance < 0 && getCreditBalanceStatus(groupDoc.data()) !== "enabled") {
+            throw new Error("当前群组未开启超额核销，核销数量不能超过当前欠款");
+          }
         } else if (recordActionType === "SET") {
-          if (amount > currentBalance) newTotalAdded += amount - currentBalance;
-          newBalance = amount;
+          newBalance = balanceMode === "CREDIT" ? -amount : amount;
+          if (newBalance < 0 && getCreditBalanceStatus(groupDoc.data()) !== "enabled") {
+            throw new Error("当前群组未开启超额核销，不能设置抵扣额度");
+          }
+          const debtIncrease = Math.max(newBalance, 0) - Math.max(currentBalance, 0);
+          if (debtIncrease > 0) newTotalAdded += debtIncrease;
         }
         beforeBalance = currentBalance;
         afterBalance = newBalance;
@@ -802,7 +978,11 @@ export async function POST(request: Request) {
           memberId,
           operatorId: user.uid,
           type: recordActionType,
-          amount: recordActionType === "SET" ? newBalance : amount,
+          amount,
+          ...(recordActionType === "DEDUCT" ? { effectiveDebtDeducted } : {}),
+          ...(recordActionType === "SET" ? { balanceMode: balanceMode === "CREDIT" ? "CREDIT" : "DEBT" } : {}),
+          beforeBalance,
+          afterBalance,
           note: cleanedNote,
           createdAt: FieldValue.serverTimestamp()
         });
@@ -811,7 +991,9 @@ export async function POST(request: Request) {
         ? `${actorName}给${memberName}记了一笔 +${amount}`
         : recordActionType === "DEDUCT"
           ? `${actorName}为${memberName}核销了 ${amount}`
-          : `${actorName}将${memberName}余额调为 ${afterBalance}`;
+          : afterBalance < 0
+            ? `${actorName}将${memberName}调为抵扣额度 ${-afterBalance}`
+            : `${actorName}将${memberName}欠款调为 ${afterBalance}`;
       await writeAuditLog({
         groupId,
         operatorId: user.uid,
@@ -821,16 +1003,20 @@ export async function POST(request: Request) {
         summary: `调整成员余额：${recordActionType}`,
         metadata: {
           amount,
+          effectiveDebtDeducted,
+          balanceMode: balanceMode === "CREDIT" ? "CREDIT" : "DEBT",
           note: cleanedNote
         },
         actorName,
         targetName: memberName,
-        amount: recordActionType === "SET" ? afterBalance : amount,
+        amount,
         beforeBalance,
         afterBalance,
         note: cleanedNote,
         displayTitle: actionTitle,
-        displayDetail: `余额从 ${beforeBalance} 调整为 ${afterBalance}`
+        displayDetail: afterBalance < 0
+          ? `调整后欠款为 0，抵扣额度为 ${-afterBalance}`
+          : `调整后欠款为 ${afterBalance}，抵扣额度为 0`
       });
       return NextResponse.json({ success: true });
     }

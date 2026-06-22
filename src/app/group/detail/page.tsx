@@ -12,6 +12,7 @@ import Link from "next/link";
 import { motion, AnimatePresence, useSpring, useTransform } from "framer-motion";
 import { ArrowDownRight, ArrowUpRight, Download, RotateCcw, Share2, Trophy } from "lucide-react";
 import { Suspense } from "react";
+import { formatBalanceState, getBalanceView } from "@/lib/balance-display";
 
 function AnimatedNumber({ value }: { value: number }) {
   const spring = useSpring(value, { stiffness: 300, damping: 30 });
@@ -30,6 +31,7 @@ interface Group {
   unit: string;
   creatorId?: string;
   requireClaimApproval?: boolean;
+  creditBalanceStatus?: "disabled" | "enabled" | "disabling";
   interestConfig?: {
     rate: number;
     fixedAmount?: number;
@@ -63,6 +65,9 @@ interface LedgerRecord {
   createdAt?: any;
   totalAdded?: number;
   note?: string;
+  balanceMode?: "DEBT" | "CREDIT";
+  beforeBalance?: number;
+  afterBalance?: number;
 }
 
 interface ClaimRequest {
@@ -170,6 +175,7 @@ function GroupDetailsContent() {
   const [memberRecords, setMemberRecords] = useState<LedgerRecord[]>([]);
   const [recordActionType, setRecordActionType] = useState<"ADD" | "DEDUCT" | "SET">("ADD");
   const [recordAmount, setRecordAmount] = useState<string>("");
+  const [recordBalanceMode, setRecordBalanceMode] = useState<"DEBT" | "CREDIT">("DEBT");
   const [recordNote, setRecordNote] = useState<string>("");
   const [editRemarkName, setEditRemarkName] = useState("");
   const [pendingClaimMemberIds, setPendingClaimMemberIds] = useState<Set<string>>(new Set());
@@ -398,7 +404,7 @@ function GroupDetailsContent() {
     return recordOperatorNames[record.operatorId] || "未知用户";
   };
 
-  const remainingTotal = members.reduce((sum, m) => sum + m.balance, 0);
+  const remainingTotal = members.reduce((sum, m) => sum + Math.max(Number(m.balance) || 0, 0), 0);
   
   const cumulativeTotal = members.reduce(
     (sum, member) => sum + Number(member.totalAdded ?? member.balance ?? 0), 0);
@@ -406,7 +412,12 @@ function GroupDetailsContent() {
   const sortedMembers = useMemo(() => {
     return [...members].sort((a, b) => {
       if (sortOption === "name") return a.remarkName.localeCompare(b.remarkName, 'zh-Hans-CN-u-co-pinyin', { sensitivity: "base", numeric: true });
-      if (sortOption === "balance") return b.balance - a.balance;
+      if (sortOption === "balance") {
+        const category = (balance: number) => balance > 0 ? 0 : balance === 0 ? 1 : 2;
+        const categoryDiff = category(a.balance) - category(b.balance);
+        if (categoryDiff !== 0) return categoryDiff;
+        return a.balance >= 0 ? b.balance - a.balance : a.balance - b.balance;
+      }
       const timeA = getTimeValue(a.createdAt);
       const timeB = getTimeValue(b.createdAt);
       return timeA - timeB;
@@ -440,6 +451,7 @@ function GroupDetailsContent() {
     setRecordActionType(nextType);
     setRecordAmount("");
     setRecordNote("");
+    setRecordBalanceMode("DEBT");
   };
 
   const handleClaim = async (memberId: string, memberName: string, e: React.MouseEvent) => {
@@ -553,6 +565,7 @@ function GroupDetailsContent() {
           memberId: selectedMember.id,
           recordActionType,
           amount,
+          ...(recordActionType === "SET" ? { balanceMode: recordBalanceMode } : {}),
           note: recordNote.trim()
         }
       });
@@ -790,6 +803,7 @@ function GroupDetailsContent() {
             {sortedMembers.map((member, index) => {
               const isUnclaimed = !member.userId;
               const isMe = member.userId === user?.uid;
+              const balanceView = getBalanceView(member.balance);
               return (
                 <motion.div 
                   layout
@@ -822,11 +836,12 @@ function GroupDetailsContent() {
                   {/* Right: Balance and Actions */}
                   <div className="flex items-center justify-end gap-3 sm:gap-6 shrink-0">
                     <div className="text-right flex flex-col justify-center">
-                      <div className="hidden sm:block text-xs text-gray-500 dark:text-gray-400 mb-0.5">当前数量</div>
+                      <div className="hidden sm:block text-xs text-gray-500 dark:text-gray-400 mb-0.5">{balanceView.hasCredit ? "当前无欠款" : "当前欠款"}</div>
                       <div className="flex items-baseline gap-0.5 sm:gap-1">
-                        <span className="text-xl sm:text-3xl font-black text-gray-900 dark:text-white leading-none"><AnimatedNumber value={member.balance} /></span>
+                        <span className="text-xl sm:text-3xl font-black text-gray-900 dark:text-white leading-none"><AnimatedNumber value={balanceView.debt} /></span>
                         <span className="text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400">{group.unit}</span>
                       </div>
+                      {balanceView.hasCredit && <div className="mt-1 text-[10px] sm:text-xs font-bold text-emerald-600 dark:text-emerald-400">抵扣额度 <span className="tabular-nums">{balanceView.credit}</span> {group.unit}</div>}
                     </div>
                     
                     <div className="w-12 sm:w-16 flex justify-end shrink-0 relative">
@@ -871,7 +886,8 @@ function GroupDetailsContent() {
             <div className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-2xl flex justify-between items-center">
               <div>
                 <h4 className="text-lg font-bold text-gray-900 dark:text-white">{selectedMember.remarkName}</h4>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">当前余额: <span className="font-black text-gray-900 dark:text-white text-lg"><AnimatedNumber value={selectedMember.balance} /></span> {group.unit}</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">当前欠款: <span className="font-black text-gray-900 dark:text-white text-lg"><AnimatedNumber value={getBalanceView(selectedMember.balance).debt} /></span> {group.unit}</p>
+                {getBalanceView(selectedMember.balance).hasCredit && <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400 mt-1">抵扣额度: {getBalanceView(selectedMember.balance).credit} {group.unit}</p>}
               </div>
               <div className="w-12 h-12 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center font-bold text-gray-600 dark:text-gray-300">{selectedMember.remarkName.charAt(0)}</div>
             </div>
@@ -883,6 +899,13 @@ function GroupDetailsContent() {
                   {isAdmin && <button type="button" onClick={() => selectRecordActionType("DEDUCT")} className={`min-w-0 px-2 py-2 text-xs sm:text-sm leading-tight font-bold rounded-lg transition-colors ${recordActionType === "DEDUCT" ? "bg-orange-500 text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>核销 (-)</button>}
                   {isAdmin && <button type="button" onClick={() => selectRecordActionType("SET")} className={`min-w-0 px-2 py-2 text-xs sm:text-sm leading-tight font-bold rounded-lg transition-colors ${recordActionType === "SET" ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>强制调平 (=)</button>}
                 </div>
+                {recordActionType === "SET" && (
+                  <div className="grid grid-cols-2 gap-2" role="group" aria-label="调平目标状态">
+                    <button type="button" onClick={() => setRecordBalanceMode("DEBT")} className={`py-2 rounded-lg text-sm font-bold transition-colors ${recordBalanceMode === "DEBT" ? "bg-gray-900 text-white dark:bg-white dark:text-gray-900" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}`}>设为欠款</button>
+                    <button type="button" onClick={() => setRecordBalanceMode("CREDIT")} disabled={group.creditBalanceStatus !== "enabled"} className={`py-2 rounded-lg text-sm font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${recordBalanceMode === "CREDIT" ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300"}`}>设为抵扣额度</button>
+                  </div>
+                )}
+                {recordActionType === "SET" && group.creditBalanceStatus !== "enabled" && <p className="text-xs text-gray-500">群主开启超额核销后，才可调平为抵扣额度。</p>}
                 <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-3">
                   <input type="number" required min={0} value={recordAmount} onChange={(e) => setRecordAmount(e.target.value)} placeholder="输入数量" className="w-full min-w-0 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-2 focus:ring-primary text-base" />
                 </div>
@@ -901,7 +924,7 @@ function GroupDetailsContent() {
                         <span className="text-sm font-medium text-gray-900 dark:text-white">
                           {record.type === "ADD" && "增加"}
                           {record.type === "DEDUCT" && "核销"}
-                          {record.type === "SET" && "强制调平为"}
+                          {record.type === "SET" && (record.balanceMode === "CREDIT" || Number(record.afterBalance) < 0 ? "强制调平为抵扣额度" : "强制调平为欠款")}
                           {record.type === "INTEREST" && "自动计息"}
                         </span>
                         <span className="text-xs text-gray-500 mt-1">{record.createdAt ? new Date(getTimeValue(record.createdAt)).toLocaleString() : "刚刚"}</span>
@@ -970,7 +993,9 @@ function GroupDetailsContent() {
       >
         {activeRankingType && weeklyRankings && (
           <div>
-            <p className="text-sm text-gray-500 dark:text-gray-400">含今天在内的 7 个自然日，按数量合计排名</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              含今天在内的 7 个自然日。仅统计记账与实际消除欠款的核销数量；调平及形成抵扣额度的部分不计入排行。
+            </p>
             <RankingPodium entries={weeklyRankings[activeRankingType]} unit={group.unit} />
           </div>
         )}
@@ -1037,8 +1062,9 @@ function GroupDetailsContent() {
                     </h3>
                   </div>
                 </div>
-                <div className="text-right">
-                  <span className="text-xl font-black text-gray-900 dark:text-white">{member.balance}</span>
+                <div className="text-right" title={formatBalanceState(member.balance, group?.unit)}>
+                  <div><span className="text-xl font-black text-gray-900 dark:text-white">{getBalanceView(member.balance).debt}</span></div>
+                  {getBalanceView(member.balance).hasCredit && <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400">抵扣额度 {getBalanceView(member.balance).credit}</div>}
                 </div>
               </div>
             ))}

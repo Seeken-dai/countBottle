@@ -8,6 +8,7 @@ import { InfiniteScrollTrigger } from "@/components/infinite-scroll-trigger";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Suspense } from "react";
 import { addInterestPeriods, createInterestScheduleAnchor, type InterestScheduleAnchor } from "@/lib/interest-schedule";
+import { formatBalanceState } from "@/lib/balance-display";
 
 interface InterestConfig {
   rate: number | string;
@@ -85,7 +86,7 @@ const auditTypesByFilter: Record<Exclude<AuditFilter, "ALL">, string[]> = {
   CLAIM: [
     "CLAIM_APPROVAL_SETTING_UPDATED", "CLAIM_REQUESTED", "CLAIM_APPROVED", "CLAIM_REJECTED"
   ],
-  SETTINGS: ["GROUP_SETTINGS_UPDATED"],
+  SETTINGS: ["GROUP_SETTINGS_UPDATED", "CREDIT_BALANCE_SETTING_UPDATED"],
   INTEREST: ["INTEREST_SETTINGS_UPDATED", "INTEREST_APPLIED"]
 };
 
@@ -167,6 +168,7 @@ function getAuditTag(log: AuditLog) {
     CLAIM_REJECTED: "认领拒绝",
     CLAIM_APPROVAL_SETTING_UPDATED: "认领设置",
     GROUP_SETTINGS_UPDATED: "群组设置",
+    CREDIT_BALANCE_SETTING_UPDATED: "抵扣设置",
     INTEREST_SETTINGS_UPDATED: "计息设置",
     INTEREST_APPLIED: "自动计息",
     CREATOR_TRANSFER: "群主移交"
@@ -199,7 +201,7 @@ function getAuditTitle(log: AuditLog) {
   const amount = typeof log.amount === "number" ? log.amount : log.metadata?.amount;
   if (log.type === "BALANCE_ADD") return amount ? `给${targetName}记了一笔 +${amount}` : cleanLegacySummary(log.summary) || "记录了一笔增加";
   if (log.type === "BALANCE_DEDUCT") return amount ? `为${targetName}核销了 ${amount}` : "核销了成员余额";
-  if (log.type === "BALANCE_SET") return typeof log.afterBalance === "number" ? `将${targetName}余额调为 ${log.afterBalance}` : "调整了成员余额";
+  if (log.type === "BALANCE_SET") return typeof log.afterBalance === "number" ? `将${targetName}调为${formatBalanceState(log.afterBalance)}` : "调整了成员余额";
   if (log.type === "MEMBER_NAME_UPDATED") return cleanLegacySummary(log.summary) || "修改了成员昵称";
   if (log.type === "INTEREST_SETTINGS_UPDATED") return "更新了计息规则";
   if (log.type === "INTEREST_APPLIED") return cleanLegacySummary(log.summary) || "系统完成自动计息";
@@ -218,7 +220,7 @@ function getAuditDetailRows(log: AuditLog) {
   const amount = typeof log.amount === "number" ? log.amount : log.metadata?.amount;
   if (typeof amount === "number") rows.push({ label: "数量", value: String(amount) });
   if (typeof log.beforeBalance === "number" && typeof log.afterBalance === "number") {
-    rows.push({ label: "余额变化", value: `${log.beforeBalance} → ${log.afterBalance}` });
+    rows.push({ label: "账目变化", value: `${formatBalanceState(log.beforeBalance)} → ${formatBalanceState(log.afterBalance)}` });
   }
   if (log.displayDetail) rows.push({ label: "说明", value: log.displayDetail });
   return rows;
@@ -240,6 +242,7 @@ function GroupSettingsContent() {
   const [groupUnit, setGroupUnit] = useState("");
   const [announcementText, setAnnouncementText] = useState("");
   const [requireClaimApproval, setRequireClaimApproval] = useState(false);
+  const [creditBalanceStatus, setCreditBalanceStatus] = useState<"disabled" | "enabled" | "disabling">("disabled");
   const [interestConfig, setInterestConfig] = useState<InterestConfig>({
     rate: 0,
     fixedAmount: 0,
@@ -344,6 +347,9 @@ function GroupSettingsContent() {
         setGroupUnit(data.unit || "瓶");
         setAnnouncementText(data.announcement || "");
         setRequireClaimApproval(!!data.requireClaimApproval);
+        setCreditBalanceStatus(data.creditBalanceStatus === "enabled" || data.creditBalanceStatus === "disabling"
+          ? data.creditBalanceStatus
+          : "disabled");
         if (data.interestConfig) {
           setInterestConfig(data.interestConfig);
           setInterestStartAt(formatDateTimeLocal(data.interestConfig.nextInterestAt));
@@ -432,6 +438,40 @@ function GroupSettingsContent() {
       alert("认领审核设置已保存");
     } catch (err) {
       alert("保存失败");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCreditBalanceToggle = async () => {
+    if (!isCreator || isSaving) return;
+    setIsSaving(true);
+    try {
+      if (creditBalanceStatus === "enabled" || creditBalanceStatus === "disabling") {
+        const impact = await proxyRequest({
+          action: "getCreditBalanceDisableImpact",
+          data: { groupId }
+        }) as { affectedMemberCount?: number; totalCredit?: number };
+        const affected = Number(impact.affectedMemberCount || 0);
+        const total = Number(impact.totalCredit || 0);
+        const confirmed = confirm(
+          `确认关闭超额核销吗？\n\n将永久清空 ${affected} 名成员共 ${total} ${groupUnit}的抵扣额度。此操作不可撤销，但会保留完整流水。`
+        );
+        if (!confirmed) return;
+        setCreditBalanceStatus("disabling");
+        await proxyRequest({ action: "updateCreditBalanceStatus", data: { groupId, status: "disabled" } });
+        setCreditBalanceStatus("disabled");
+        const fetchedMembers = await queryProxy("Members", [["groupId", "==", groupId]]) as MemberData[];
+        setMembers(fetchedMembers);
+        alert("超额核销已关闭，抵扣额度已清理");
+      } else {
+        await proxyRequest({ action: "updateCreditBalanceStatus", data: { groupId, status: "enabled" } });
+        setCreditBalanceStatus("enabled");
+        alert("超额核销已开启");
+      }
+      await loadAuditLogs(true);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "设置失败，请重试");
     } finally {
       setIsSaving(false);
     }
@@ -618,6 +658,32 @@ function GroupSettingsContent() {
             )}
           </div>
         </section>}
+
+        {/* Credit Balance Settings */}
+        <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm">
+          <h2 className="text-xl font-extrabold text-gray-900 dark:text-white mb-3 flex items-center">
+            <span className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 flex items-center justify-center mr-3">抵</span>
+            抵扣额度
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+            开启后，核销超过当前欠款的部分会成为抵扣额度，并自动抵扣未来新增债务。抵扣额度不参与计息。
+          </p>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-800">
+            <div>
+              <h3 className="font-bold text-gray-900 dark:text-white">允许超额核销</h3>
+              <p className="text-xs text-gray-500 mt-1">
+                {creditBalanceStatus === "enabled" ? "已开启，可产生抵扣额度。" : creditBalanceStatus === "disabling" ? "正在清理已有抵扣额度，可重试关闭操作。" : "已关闭，核销不能超过当前欠款。"}
+              </p>
+            </div>
+            <span className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-black ${creditBalanceStatus === "enabled" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" : creditBalanceStatus === "disabling" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"}`}>
+              {creditBalanceStatus === "enabled" ? "已开启" : creditBalanceStatus === "disabling" ? "清理中" : "已关闭"}
+            </span>
+          </div>
+          <button type="button" onClick={handleCreditBalanceToggle} disabled={!isCreator || isSaving} className={`mt-4 w-full py-3 rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${creditBalanceStatus === "enabled" || creditBalanceStatus === "disabling" ? "bg-red-600 text-white hover:bg-red-700" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}>
+            {creditBalanceStatus === "enabled" ? "关闭并清空抵扣额度" : creditBalanceStatus === "disabling" ? "重试清理并关闭" : "开启超额核销"}
+          </button>
+          {!isCreator && <p className="text-xs text-gray-500 text-center mt-3">仅群主可以修改此设置。</p>}
+        </section>
 
         {/* Claim Approval */}
         <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm">

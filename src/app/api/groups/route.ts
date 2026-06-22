@@ -58,6 +58,7 @@ export async function POST(request: Request) {
       name,
       unit,
       currency: unit,
+      creditBalanceStatus: "disabled",
       description: description || "",
       creatorId: user.uid,
       createdBy: user.uid,

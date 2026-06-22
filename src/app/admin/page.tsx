@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { proxyRequest, queryProxy } from "@/lib/useFirestore";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Modal } from "@/components/ui/modal";
+import { getBalanceView } from "@/lib/balance-display";
 
 interface UserData {
   uid: string;
@@ -332,11 +333,12 @@ export default function AdminPage() {
                             {isCreator && <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-orange-500 text-white">群主</span>}
                             {!isCreator && ["ADMIN", "SUB_ADMIN", "OWNER"].includes(member.role) && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">子管理员</span>}
                           </div>
-                          <p className="text-xs text-gray-500 mt-1">
+                          <div className="text-xs text-gray-500 mt-1">
                             {member.userId ? (member.displayName ? `绑: ${member.displayName}` : "已绑定真实用户") : "空白卡片(未认领)"} 
                             {" · "}
-                            余额: {member.balance}
-                          </p>
+                            欠款: {getBalanceView(member.balance).debt}
+                            {getBalanceView(member.balance).hasCredit && <span className="ml-2 font-bold text-emerald-600 dark:text-emerald-400">抵扣额度: {getBalanceView(member.balance).credit}</span>}
+                          </div>
                         </div>
                         <div className="flex gap-2">
                           {!isCreator && (

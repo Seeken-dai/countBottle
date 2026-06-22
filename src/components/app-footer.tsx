@@ -3,12 +3,12 @@
 import { useState } from "react";
 import { Modal } from "@/components/ui/modal";
 
-const VERSION = "1.4.2";
+const VERSION = "1.5.0";
 
 const releaseNotes = [
-  "群组长图新增移动端原生分享功能。",
-  "支持分享文件的 iOS、Android 浏览器可直接打开系统分享面板。",
-  "不支持原生分享的浏览器继续保留图片下载方式。"
+  "群主可开启超额核销，将多核销部分转为抵扣额度。",
+  "抵扣额度会自动抵扣未来新增债务，并以绿色状态清晰展示。",
+  "核销排行仅统计实际消除的欠款，调平不参与排行。"
 ];
 
 export function AppFooter() {
