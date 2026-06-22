@@ -624,7 +624,7 @@ function GroupDetailsContent() {
                         {isMe && <span className="px-1.5 py-0.5 text-[10px] font-black bg-primary text-white rounded-md shrink-0">我</span>}
                         {member.userId === creatorId && <span className="px-1.5 py-0.5 text-[10px] font-black bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300 rounded-md shrink-0">群主</span>}
                         {member.userId !== creatorId && ["OWNER", "ADMIN", "SUB_ADMIN"].includes(member.role) && <span className="px-1.5 py-0.5 text-[10px] font-bold bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 rounded-md shrink-0">子管理员</span>}
-                        {isUnclaimed && <span className="px-1.5 py-0.5 text-[10px] font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 rounded-md shrink-0">未认领</span>}
+                        {isUnclaimed && <span className="px-1.5 py-0.5 text-[10px] font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300 rounded-md shrink-0">未认领</span>}
                       </h3>
                       {member.displayName && member.displayName !== member.remarkName && <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 truncate">{member.displayName}</p>}
                     </div>

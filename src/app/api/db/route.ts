@@ -436,7 +436,7 @@ export async function POST(request: Request) {
     }
     else if (action === "updateGroupBasic") {
       const { groupId, name, unit, announcement } = data || {};
-      if (!(await canManageOwnerOnly(groupId, user.uid))) return NextResponse.json({ error: "仅群主可执行此操作" }, { status: 403 });
+      if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       await adminDb.collection("Groups").doc(groupId).update({
         name: String(name || "").trim(),
         unit: String(unit || "").trim(),
@@ -479,7 +479,7 @@ export async function POST(request: Request) {
     }
     else if (action === "updateGroupInterest") {
       const { groupId, interestConfig } = data || {};
-      if (!(await canManageOwnerOnly(groupId, user.uid))) return NextResponse.json({ error: "仅群主可执行此操作" }, { status: 403 });
+      if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       const isEnabled = interestConfig?.type !== "none" && interestConfig?.frequency !== "none";
       const nextInterestDate = isEnabled ? parseFirestoreDate(interestConfig?.nextInterestAt) : null;
       const currentMinute = new Date();

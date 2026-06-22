@@ -551,7 +551,7 @@ function GroupSettingsContent() {
       <main className="max-w-2xl mx-auto px-4 sm:px-6 py-8 space-y-8">
         
         {/* Basic Settings */}
-        {isCreator && <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm">
+        <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm">
             <h2 className="text-xl font-extrabold text-gray-900 dark:text-white mb-6 flex items-center">
             <span className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center mr-3">⚙️</span>
             基础设置
@@ -574,7 +574,7 @@ function GroupSettingsContent() {
               保存基础设置
             </button>
           </form>
-        </section>}
+        </section>
 
         {/* Sub-Admin Settings */}
         {isCreator && <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm">
@@ -742,7 +742,7 @@ function GroupSettingsContent() {
         </section>
 
         {/* Interest Settings */}
-        {isCreator && <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm relative overflow-hidden">
+        <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm relative overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl" />
           <h2 className="text-xl font-extrabold text-gray-900 dark:text-white mb-6 flex items-center relative z-10">
             <span className="w-8 h-8 rounded-lg bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 flex items-center justify-center mr-3">📈</span>
@@ -813,7 +813,7 @@ function GroupSettingsContent() {
               保存计息规则
             </button>
           </form>
-        </section>}
+        </section>
 
         {/* Danger Zone */}
         {isCreator && <section className="bg-red-50/50 dark:bg-red-900/10 rounded-3xl p-6 md:p-8 border border-red-100 dark:border-red-900/30">
