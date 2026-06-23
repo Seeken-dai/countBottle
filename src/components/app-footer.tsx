@@ -3,14 +3,13 @@
 import { useState } from "react";
 import { Modal } from "@/components/ui/modal";
 
-const VERSION = "1.5.0";
+const VERSION = "1.5.1";
 
 const releaseNotes = [
-  "群主可开启超额核销，将多核销部分转为抵扣额度。",
-  "抵扣额度会自动抵扣未来新增债务，并以绿色状态清晰展示。",
-  "核销排行仅统计实际消除的欠款，调平不参与排行。",
-  "移动端分享长图时仅传递生成的 PNG 图片文件。",
-  "成员按数量排序时，抵扣额度按从少到多排列。"
+  "清理全项目 ESLint 错误和警告，恢复代码质量检查。",
+  "收紧 API、Firestore 与页面数据类型，减少运行时字段错误。",
+  "优化 Hook 状态同步与依赖关系，降低重复渲染和旧数据风险。",
+  "部署前新增强制 lint 与类型检查，防止质量问题再次积累。"
 ];
 
 export function AppFooter() {

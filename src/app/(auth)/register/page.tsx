@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getSafeAppRedirect } from "@/lib/safe-redirect";
+import { getErrorMessage } from "@/lib/error-message";
 
 function RegisterContent() {
   const [email, setEmail] = useState("");
@@ -36,8 +37,8 @@ function RegisterContent() {
       if (!res.ok) throw new Error(data.error);
 
       window.location.replace(redirectUrl);
-    } catch (err: any) {
-      setError(err.message || "注册失败，该邮箱可能已被使用");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "注册失败，该邮箱可能已被使用"));
     } finally {
       setIsLoading(false);
     }

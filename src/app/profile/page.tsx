@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -14,14 +14,8 @@ export default function ProfilePage() {
   const { user, mutateUser } = useAuth();
   const router = useRouter();
 
-  const [displayName, setDisplayName] = useState("");
+  const [displayName, setDisplayName] = useState(user?.displayName || "");
   const [isLoading, setIsLoading] = useState(false);
-
-  useEffect(() => {
-    if (user) {
-      setDisplayName(user.displayName || "");
-    }
-  }, [user]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase-admin";
 import { verifyUser } from "@/lib/auth-server";
-import { FieldValue, type Query } from "firebase-admin/firestore";
+import { FieldValue, type DocumentData, type Query } from "firebase-admin/firestore";
 import { getDueInterestSchedule, normalizeInterestScheduleAnchor, type InterestFrequency } from "@/lib/interest-schedule";
 
 export const runtime = "nodejs";
@@ -53,21 +53,29 @@ function hasOnlyKeys(value: unknown, allowedKeys: ReadonlySet<string>) {
     && Object.keys(value).every((key) => allowedKeys.has(key));
 }
 
-function serializeFirestore(value: any): any {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function serializeFirestore(value: unknown): unknown {
   if (!value) return value;
-  if (typeof value.toDate === "function") return value.toDate().toISOString();
+  if (isRecord(value) && typeof value.toDate === "function") {
+    const date = value.toDate();
+    return date instanceof Date ? date.toISOString() : value;
+  }
   if (Array.isArray(value)) return value.map(serializeFirestore);
-  if (typeof value === "object") {
+  if (isRecord(value)) {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, serializeFirestore(item)]));
   }
   return value;
 }
 
-function resolveSentinels(value: any): any {
+function resolveSentinels(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(resolveSentinels);
+  if (!isRecord(value)) return value;
   if (value.__serverTimestamp) return FieldValue.serverTimestamp();
   if (typeof value.__increment === "number") return FieldValue.increment(value.__increment);
-  if (Array.isArray(value)) return value.map(resolveSentinels);
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolveSentinels(item)]));
 }
 
@@ -162,10 +170,11 @@ function getUserDisplayName(user: { name?: string | null; email?: string | null 
   return fallback;
 }
 
-function getMemberDisplayName(member: any, fallback = "成员") {
-  const remarkName = typeof member?.remarkName === "string" ? member.remarkName.trim() : "";
+function getMemberDisplayName(member: unknown, fallback = "成员") {
+  if (!isRecord(member)) return fallback;
+  const remarkName = typeof member.remarkName === "string" ? member.remarkName.trim() : "";
   if (remarkName) return remarkName;
-  const displayName = typeof member?.displayName === "string" ? member.displayName.trim() : "";
+  const displayName = typeof member.displayName === "string" ? member.displayName.trim() : "";
   return displayName || fallback;
 }
 
@@ -367,7 +376,7 @@ export async function POST(request: Request) {
       const snapshot = await query.get();
       const hasMore = isPagedQuery && snapshot.docs.length > safeLimit;
       const pageDocs = isPagedQuery ? snapshot.docs.slice(0, safeLimit) : snapshot.docs;
-      const docs = pageDocs.map((d: any) => serializeFirestore({ id: d.id, ...d.data() }));
+      const docs = pageDocs.map((d) => serializeFirestore({ id: d.id, ...d.data() }));
       if (isPagedQuery) {
         return NextResponse.json({
           docs,
@@ -411,7 +420,7 @@ export async function POST(request: Request) {
         .where("groupId", "==", data.groupId).where("userId", "==", user.uid).limit(1).get();
       if (!existingMember.empty) return NextResponse.json({ error: "User already joined this group" }, { status: 409 });
       const newRef = adminDb.collection("Members").doc();
-      await newRef.set(resolveSentinels({ ...data, createdAt: FieldValue.serverTimestamp() }));
+      await newRef.set(resolveSentinels({ ...data, createdAt: FieldValue.serverTimestamp() }) as DocumentData);
       return NextResponse.json({ id: newRef.id });
     }
     else if (action === "set") {
@@ -423,7 +432,7 @@ export async function POST(request: Request) {
         || !["time", "name", "balance"].includes(data.groupMemberSortOption)) {
         return NextResponse.json({ error: "Invalid user update" }, { status: 400 });
       }
-      await adminDb.collection("Users").doc(user.uid).update(resolveSentinels({ ...data, updatedAt: FieldValue.serverTimestamp() }));
+      await adminDb.collection("Users").doc(user.uid).update(resolveSentinels({ ...data, updatedAt: FieldValue.serverTimestamp() }) as DocumentData);
       return NextResponse.json({ success: true });
     }
     else if (action === "delete") {
@@ -1158,7 +1167,7 @@ export async function POST(request: Request) {
         displayName: data.displayName,
         photoURL: null,
         updatedAt: FieldValue.serverTimestamp()
-      }), { merge: true });
+      }) as DocumentData, { merge: true });
       return NextResponse.json({ success: true });
     }
     else if (action === "transaction_interest") {
@@ -1268,8 +1277,8 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("DB Proxy Error:", error);
-    return NextResponse.json({ error: error.message || "Internal Error" }, { status: 500 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Internal Error" }, { status: 500 });
   }
 }

@@ -13,6 +13,9 @@ import { motion, AnimatePresence, useSpring, useTransform } from "framer-motion"
 import { ArrowDownRight, ArrowUpRight, Download, RotateCcw, Share2, Trophy } from "lucide-react";
 import { Suspense } from "react";
 import { formatBalanceState, getBalanceView } from "@/lib/balance-display";
+import { getErrorMessage } from "@/lib/error-message";
+import Image from "next/image";
+import type { ProxyWhereClause } from "@/lib/useFirestore";
 
 function AnimatedNumber({ value }: { value: number }) {
   const spring = useSpring(value, { stiffness: 300, damping: 30 });
@@ -30,6 +33,8 @@ interface Group {
   name: string;
   unit: string;
   creatorId?: string;
+  createdBy?: string;
+  currency?: string;
   requireClaimApproval?: boolean;
   creditBalanceStatus?: "disabled" | "enabled" | "disabling";
   interestConfig?: {
@@ -38,7 +43,7 @@ interface Group {
     type: "none" | "simple" | "compound" | "fixed";
     frequency: "none" | "daily" | "weekly" | "monthly" | "yearly";
     nextInterestAt?: unknown;
-    lastCalculatedAt?: any;
+    lastCalculatedAt?: unknown;
   };
   announcement?: string;
 }
@@ -50,7 +55,7 @@ interface Member {
   role: string;
   remarkName: string;
   balance: number;
-  createdAt: any;
+  createdAt: unknown;
   totalAdded?: number;
   displayName?: string;
   photoURL?: string;
@@ -62,7 +67,7 @@ interface LedgerRecord {
   operatorId: string;
   type: "ADD" | "DEDUCT" | "SET" | "INTEREST";
   amount: number;
-  createdAt?: any;
+  createdAt?: unknown;
   totalAdded?: number;
   note?: string;
   balanceMode?: "DEBT" | "CREDIT";
@@ -95,12 +100,13 @@ type RankingType = "add" | "deduct";
 
 type SortOption = "time" | "name" | "balance";
 
-function getTimeValue(value: any) {
+function getTimeValue(value: unknown) {
   if (!value) return 0;
   if (typeof value === "string") return new Date(value).getTime();
-  if (typeof value.toMillis === "function") return value.toMillis();
-  if (typeof value.seconds === "number") return value.seconds * 1000;
-  if (typeof value._seconds === "number") return value._seconds * 1000;
+  if (typeof value !== "object") return 0;
+  if ("toMillis" in value && typeof value.toMillis === "function") return value.toMillis();
+  if ("seconds" in value && typeof value.seconds === "number") return value.seconds * 1000;
+  if ("_seconds" in value && typeof value._seconds === "number") return value._seconds * 1000;
   return 0;
 }
 
@@ -148,6 +154,7 @@ function GroupDetailsContent() {
   const [sortOption, setSortOption] = useState<SortOption>("time");
   
   const [floaters, setFloaters] = useState<{id: number, memberId: string}[]>([]);
+  const floaterIdRef = useRef(0);
 
   const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
   const [newMemberName, setNewMemberName] = useState("");
@@ -161,16 +168,7 @@ function GroupDetailsContent() {
   const [isSharingPreviewImage, setIsSharingPreviewImage] = useState(false);
 
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
-  const [activeMember, setActiveMember] = useState<Member | null>(null);
-
-  useEffect(() => {
-    if (selectedMemberId) {
-      const m = members.find(m => m.id === selectedMemberId);
-      if (m) setActiveMember(m);
-    }
-  }, [selectedMemberId, members]);
-
-  const selectedMember = activeMember;
+  const selectedMember = selectedMemberId ? members.find((member) => member.id === selectedMemberId) || null : null;
   
   const [memberRecords, setMemberRecords] = useState<LedgerRecord[]>([]);
   const [recordActionType, setRecordActionType] = useState<"ADD" | "DEDUCT" | "SET">("ADD");
@@ -225,7 +223,7 @@ function GroupDetailsContent() {
   }, [groupId, loadWeeklyRankings]);
 
   // LAZY EVALUATION FOR INTEREST
-  const triggerLazyInterest = async (groupData: Group) => {
+  const triggerLazyInterest = useCallback(async (groupData: Group) => {
     if (!groupData.interestConfig || groupData.interestConfig.type === "none" || groupData.interestConfig.frequency === "none" || !groupData.interestConfig.nextInterestAt) {
       return;
     }
@@ -234,18 +232,18 @@ function GroupDetailsContent() {
     } catch (err) {
       console.error("Lazy evaluation failed:", err);
     }
-  };
+  }, [groupId]);
 
   useEffect(() => {
     let cancelled = false;
 
     const fetchGroupData = async () => {
-      const groupData = await getDocProxy("Groups", groupId) as Group | null;
+      const groupData = await getDocProxy<Group>("Groups", groupId);
       if (cancelled) return;
       if (groupData) {
-        const normalizedGroup = { ...groupData, unit: groupData.unit || (groupData as any).currency || "瓶" };
+        const normalizedGroup = { ...groupData, unit: groupData.unit || groupData.currency || "瓶" };
         setGroup(normalizedGroup);
-        triggerLazyInterest(normalizedGroup);
+        void triggerLazyInterest(normalizedGroup);
       } else {
         alert("群组不存在");
         router.push("/dashboard");
@@ -253,10 +251,10 @@ function GroupDetailsContent() {
     }
 
     const fetchMembers = async () => {
-      const memberDocs = await queryProxy("Members", [["groupId", "==", groupId]]) as Member[];
+      const memberDocs = await queryProxy<Member>("Members", [["groupId", "==", groupId]]);
       const resolvedMembers = await Promise.all(memberDocs.map(async (m) => {
         if (m.userId) {
-          const uData = await getDocProxy("Users", m.userId);
+          const uData = await getDocProxy<{ displayName?: string }>("Users", m.userId);
           if (uData) {
             return { ...m, displayName: uData.displayName };
           }
@@ -276,14 +274,14 @@ function GroupDetailsContent() {
       cancelled = true;
       stopRefreshing();
     };
-  }, [groupId, router, refreshToken]);
+  }, [groupId, router, refreshToken, triggerLazyInterest]);
 
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
 
     const fetchSortPreference = async () => {
-      const userDoc = await getDocProxy("Users", user.uid);
+      const userDoc = await getDocProxy<{ groupMemberSortOption?: SortOption }>("Users", user.uid);
       const preferredSort = userDoc?.groupMemberSortOption as SortOption | undefined;
       if (!cancelled && (preferredSort === "time" || preferredSort === "name" || preferredSort === "balance")) {
         setSortOption(preferredSort);
@@ -323,7 +321,7 @@ function GroupDetailsContent() {
         page.docs.map((record) => record.operatorId).filter((id) => id && id !== "SYSTEM")
       ));
       const operatorEntries = await Promise.all(operatorIds.map(async (operatorId) => {
-        const operator = await getDocProxy("Users", operatorId);
+        const operator = await getDocProxy<{ displayName?: string }>("Users", operatorId);
         return [operatorId, operator?.displayName || "未知用户"] as const;
       }));
       if (requestId !== memberRecordsRequestRef.current) return;
@@ -369,7 +367,7 @@ function GroupDetailsContent() {
 
 
   const currentUserMember = members.find(m => m.userId === user?.uid);
-  const creatorId = group?.creatorId || (group as any)?.createdBy;
+  const creatorId = group?.creatorId || group?.createdBy;
   const isCreator = creatorId === user?.uid;
   const isSubAdmin = currentUserMember?.role === "SUB_ADMIN" || currentUserMember?.role === "ADMIN" || currentUserMember?.role === "OWNER";
   const isAdmin = isCreator || isSubAdmin;
@@ -379,10 +377,10 @@ function GroupDetailsContent() {
     let cancelled = false;
 
     const fetchPendingClaims = async () => {
-      const filters = isAdmin
+      const filters: ProxyWhereClause[] = isAdmin
         ? [["groupId", "==", groupId], ["status", "==", "PENDING"]]
         : [["groupId", "==", groupId], ["requesterId", "==", user.uid], ["status", "==", "PENDING"]];
-      const claims = await queryProxy("ClaimRequests", filters) as ClaimRequest[];
+      const claims = await queryProxy<ClaimRequest>("ClaimRequests", filters);
       if (!cancelled) {
         setPendingClaimMemberIds(new Set(
           claims.filter((claim) => claim.requesterId === user.uid).map((claim) => claim.memberId)
@@ -433,7 +431,7 @@ function GroupDetailsContent() {
       setRefreshToken((value) => value + 1);
       setIsAddMemberModalOpen(false);
       setNewMemberName("");
-    } catch (err) { alert("添加成员失败"); } finally { setIsActionLoading(false); }
+    } catch { alert("添加成员失败"); } finally { setIsActionLoading(false); }
   };
 
   const handleSortChange = async (nextSort: SortOption) => {
@@ -467,7 +465,7 @@ function GroupDetailsContent() {
       } else if (result?.status === "APPROVED") {
         setRefreshToken((value) => value + 1);
       }
-    } catch (err: any) { alert(err.message || "认领失败"); }
+    } catch (err: unknown) { alert(getErrorMessage(err, "认领失败")); }
   };
 
   const generateImage = async () => {
@@ -498,9 +496,9 @@ function GroupDetailsContent() {
       setPreviewImageFile(imageFile);
       setCanSharePreviewImage(supportsFileSharing);
       setPreviewImage(dataUrl);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      alert("生成图片失败: " + (err.message || String(err)));
+      alert("生成图片失败: " + getErrorMessage(err, "未知错误"));
     } finally {
       setIsGenerating(false);
     }
@@ -538,7 +536,7 @@ function GroupDetailsContent() {
     e.stopPropagation();
     if (!user) return;
     
-    const floatId = Date.now();
+    const floatId = ++floaterIdRef.current;
     setFloaters(prev => [...prev, { id: floatId, memberId }]);
     setTimeout(() => {
       setFloaters(prev => prev.filter(f => f.id !== floatId));
@@ -548,7 +546,7 @@ function GroupDetailsContent() {
       await proxyRequest({ action: "quickAddRecord", data: { groupId, memberId } });
       setRefreshToken((value) => value + 1);
       void loadWeeklyRankings();
-    } catch (err) { alert("操作失败"); }
+    } catch { alert("操作失败"); }
   };
 
   const handleRecordSubmit = async (e: React.FormEvent) => {
@@ -578,7 +576,7 @@ function GroupDetailsContent() {
       if (recordActionType === "ADD" || recordActionType === "DEDUCT") {
         void loadWeeklyRankings();
       }
-    } catch (err: any) { alert(err.message || "操作失败"); } 
+    } catch (err: unknown) { alert(getErrorMessage(err, "操作失败")); }
     finally { setIsActionLoading(false); }
   };
 
@@ -592,7 +590,7 @@ function GroupDetailsContent() {
       setMembers(prev => prev.map(member => member.id === selectedMember.id ? { ...member, remarkName: nextName } : member));
       setEditRemarkName(nextName);
       alert("成员昵称已保存");
-    } catch (err: any) { alert(err.message || "修改失败"); }
+    } catch (err: unknown) { alert(getErrorMessage(err, "修改失败")); }
     finally { setIsActionLoading(false); }
   };
 
@@ -603,7 +601,7 @@ function GroupDetailsContent() {
       await proxyRequest({ action: "unbindMember", data: { groupId, memberId: selectedMember.id } });
       setRefreshToken((value) => value + 1);
     }
-    catch (err) { alert("解绑失败"); }
+    catch { alert("解绑失败"); }
   };
 
   const handleDeleteMember = async () => {
@@ -613,7 +611,7 @@ function GroupDetailsContent() {
       await proxyRequest({ action: "deleteMember", data: { groupId, memberId: selectedMember.id } });
       setSelectedMemberId(null);
       setRefreshToken((value) => value + 1);
-    } catch (err) { alert("删除失败"); }
+    } catch { alert("删除失败"); }
   };
 
   if (!group) return <div className="min-h-screen flex items-center justify-center"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div></div>;
@@ -1004,11 +1002,14 @@ function GroupDetailsContent() {
       </Modal>
       <Modal isOpen={!!previewImage} onClose={closePreviewImage} title="排行榜长图">
         <div className="flex flex-col items-center gap-4">
-          <p className="text-sm text-gray-500 text-center">
-            {canSharePreviewImage ? "可直接调用手机系统分享，也可以下载图片" : "长按图片（手机）、右键（电脑）或点击下方按钮下载"}
-          </p>
+          <div className="space-y-1 text-center">
+            <p className="text-sm text-gray-500">
+              {canSharePreviewImage ? "可直接调用手机系统分享，也可以下载图片" : "长按图片（手机）、右键（电脑）或点击下方按钮下载"}
+            </p>
+            <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">分享到微信建议长按图片进行操作</p>
+          </div>
           <div className="max-h-[60vh] overflow-y-auto w-full flex justify-center rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-black p-2">
-            {previewImage && <img src={previewImage} alt="群组长图" className="max-w-full h-auto rounded-lg shadow-sm" style={{ objectFit: 'contain' }} />}
+            {previewImage && <Image src={previewImage} alt="群组长图" width={800} height={1200} unoptimized className="max-w-full h-auto rounded-lg shadow-sm" style={{ objectFit: 'contain' }} />}
           </div>
           <div className="grid w-full grid-cols-2 gap-3">
             {canSharePreviewImage && (

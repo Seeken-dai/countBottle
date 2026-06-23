@@ -40,7 +40,7 @@ export async function GET() {
     }
 
     return NextResponse.json({ groups: groupsData, isSuperAdmin });
-  } catch (error) {
+    } catch {
     return NextResponse.json({ error: "Internal Error" }, { status: 500 });
   }
 }
@@ -90,7 +90,7 @@ export async function POST(request: Request) {
         createdBy: user.uid
       }
     });
-  } catch (error) {
+    } catch {
     return NextResponse.json({ error: "Internal Error" }, { status: 500 });
   }
 }

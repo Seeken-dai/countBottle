@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 import { addDocProxy, getDocProxy, queryProxy } from "@/lib/useFirestore";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Suspense } from "react";
+import { getErrorMessage } from "@/lib/error-message";
 
 function InviteContent() {
   const searchParams = useSearchParams();
@@ -14,14 +15,11 @@ function InviteContent() {
   const router = useRouter();
   const [groupName, setGroupName] = useState<string>("");
   const [error, setError] = useState<string>("");
-  const [isJoining, setIsJoining] = useState(false);
+  const invalidLinkError = id ? "" : "邀请链接无效，请向群组管理员重新获取";
 
   useEffect(() => {
     if (loading) return;
-    if (!id) {
-      setError("邀请链接无效，请向群组管理员重新获取");
-      return;
-    }
+    if (!id) return;
     if (!user) {
       const inviteUrl = `/invite?id=${encodeURIComponent(id)}`;
       router.replace(`/?redirect=${encodeURIComponent(inviteUrl)}`);
@@ -30,15 +28,14 @@ function InviteContent() {
 
     const fetchGroupAndJoin = async () => {
       try {
-        setIsJoining(true);
         // 1. Fetch group
-        const group = await getDocProxy("Groups", id);
+        const group = await getDocProxy<{ name?: string }>("Groups", id);
         
         if (!group) {
           setError("群组不存在或已被解散");
           return;
         }
-        setGroupName(group.name);
+        setGroupName(group.name || "群组");
 
         // 2. Check if already a member
         const members = await queryProxy("Members", [["groupId", "==", id], ["userId", "==", user.uid]]);
@@ -61,18 +58,17 @@ function InviteContent() {
 
         // Redirect to group page after successful join
         router.replace(`/group/detail?id=${id}`);
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Join error:", err);
-        setError("加入群组失败，请重试");
-      } finally {
-        setIsJoining(false);
+        setError(getErrorMessage(err, "加入群组失败，请重试"));
       }
     };
 
     void fetchGroupAndJoin();
   }, [user, loading, id, router]);
 
-  if (error) {
+  const displayedError = invalidLinkError || error;
+  if (displayedError) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-black p-4">
         <div className="bg-white dark:bg-gray-900 p-8 rounded-3xl shadow-xl text-center max-w-sm w-full border border-gray-200 dark:border-gray-800">
@@ -80,7 +76,7 @@ function InviteContent() {
             <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
           </div>
           <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">出错了</h2>
-          <p className="text-gray-500 dark:text-gray-400 mb-6">{error}</p>
+          <p className="text-gray-500 dark:text-gray-400 mb-6">{displayedError}</p>
           <button onClick={() => router.push("/dashboard")} className="w-full py-3 rounded-xl bg-primary text-white font-bold hover:bg-primary/90 transition-colors">
             返回看板
           </button>

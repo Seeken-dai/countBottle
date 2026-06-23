@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getSafeAppRedirect } from "@/lib/safe-redirect";
+import { getErrorMessage } from "@/lib/error-message";
 
 function LoginContent() {
   const [email, setEmail] = useState("");
@@ -27,8 +28,8 @@ function LoginContent() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       window.location.replace(redirectUrl);
-    } catch (err: any) {
-      setError(err.message || "登录失败，请检查邮箱和密码");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "登录失败，请检查邮箱和密码"));
     } finally {
       setIsLoading(false);
     }

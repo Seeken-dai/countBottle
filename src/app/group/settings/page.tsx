@@ -9,6 +9,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Suspense } from "react";
 import { addInterestPeriods, createInterestScheduleAnchor, type InterestScheduleAnchor } from "@/lib/interest-schedule";
 import { formatBalanceState } from "@/lib/balance-display";
+import { getErrorMessage } from "@/lib/error-message";
 
 interface InterestConfig {
   rate: number | string;
@@ -16,7 +17,7 @@ interface InterestConfig {
   type: "none" | "simple" | "compound" | "fixed";
   frequency: "none" | "daily" | "weekly" | "monthly" | "yearly";
   nextInterestAt?: unknown;
-  lastCalculatedAt?: any;
+  lastCalculatedAt?: unknown;
   scheduleAnchor?: InterestScheduleAnchor | null;
 }
 
@@ -29,6 +30,17 @@ interface MemberData {
   balance: number;
 }
 
+interface GroupSettingsData {
+  creatorId?: string;
+  createdBy?: string;
+  name?: string;
+  unit?: string;
+  announcement?: string;
+  requireClaimApproval?: boolean;
+  creditBalanceStatus?: "disabled" | "enabled" | "disabling";
+  interestConfig?: InterestConfig;
+}
+
 interface ClaimRequest {
   id: string;
   memberId: string;
@@ -36,7 +48,7 @@ interface ClaimRequest {
   requesterEmail?: string;
   requesterName?: string;
   status: "PENDING" | "APPROVED" | "REJECTED";
-  createdAt?: any;
+  createdAt?: unknown;
 }
 
 interface AuditLog {
@@ -62,7 +74,7 @@ interface AuditLog {
     rate?: number;
     [key: string]: unknown;
   };
-  createdAt?: any;
+  createdAt?: unknown;
 }
 
 type AuditFilter = "ALL" | "BALANCE" | "MEMBER" | "CLAIM" | "SETTINGS" | "INTEREST";
@@ -96,16 +108,17 @@ function getAuditWhere(groupId: string, filter: AuditFilter) {
   return where;
 }
 
-function getTimeValue(value: any) {
+function getTimeValue(value: unknown) {
   if (!value) return 0;
   if (typeof value === "string") return new Date(value).getTime();
-  if (typeof value.toMillis === "function") return value.toMillis();
-  if (typeof value.seconds === "number") return value.seconds * 1000;
-  if (typeof value._seconds === "number") return value._seconds * 1000;
+  if (typeof value !== "object") return 0;
+  if ("toMillis" in value && typeof value.toMillis === "function") return value.toMillis();
+  if ("seconds" in value && typeof value.seconds === "number") return value.seconds * 1000;
+  if ("_seconds" in value && typeof value._seconds === "number") return value._seconds * 1000;
   return 0;
 }
 
-function formatDateTimeLocal(value: any) {
+function formatDateTimeLocal(value: unknown) {
   const timeValue = getTimeValue(value);
   if (!timeValue) return "";
   const date = new Date(timeValue);
@@ -131,7 +144,7 @@ function getCurrentMinuteValue() {
   return formatDateTimeLocal(now.toISOString());
 }
 
-function formatAuditTime(value: any) {
+function formatAuditTime(value: unknown) {
   const timeValue = getTimeValue(value);
   if (!timeValue) return "刚刚";
   const date = new Date(timeValue);
@@ -329,10 +342,10 @@ function GroupSettingsContent() {
     const fetchAuthAndData = async () => {
       if (!user) return;
       
-      const data = await getDocProxy("Groups", groupId);
+      const data = await getDocProxy<GroupSettingsData>("Groups", groupId);
       if (data) {
         const creatorId = data.creatorId || data.createdBy;
-        const fetchedMembers = await queryProxy("Members", [["groupId", "==", groupId]]) as MemberData[];
+        const fetchedMembers = await queryProxy<MemberData>("Members", [["groupId", "==", groupId]]);
         const currentMember = fetchedMembers.find(member => member.userId === user.uid);
         const canManage = creatorId === user.uid || currentMember?.role === "OWNER" || currentMember?.role === "ADMIN" || currentMember?.role === "SUB_ADMIN";
         if (!canManage) {
@@ -356,7 +369,7 @@ function GroupSettingsContent() {
         }
 
         setMembers(fetchedMembers);
-        const fetchedClaims = await queryProxy("ClaimRequests", [["groupId", "==", groupId], ["status", "==", "PENDING"]]) as ClaimRequest[];
+        const fetchedClaims = await queryProxy<ClaimRequest>("ClaimRequests", [["groupId", "==", groupId], ["status", "==", "PENDING"]]);
         fetchedClaims.sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
         setClaimRequests(fetchedClaims);
       } else {
@@ -375,7 +388,7 @@ function GroupSettingsContent() {
     try {
       await proxyRequest({ action: "updateGroupBasic", data: { groupId, name: groupName.trim(), unit: groupUnit.trim(), announcement: announcementText.trim() } });
       alert("基础设置已保存");
-    } catch (err) { alert("保存失败"); }
+    } catch { alert("保存失败"); }
     finally { setIsSaving(false); }
   };
 
@@ -425,7 +438,7 @@ function GroupSettingsContent() {
     try {
       await proxyRequest({ action: "batchDeleteGroup", docId: groupId });
       router.push("/dashboard");
-    } catch (err) {
+    } catch {
       alert("删除失败");
       setIsSaving(false);
     }
@@ -436,7 +449,7 @@ function GroupSettingsContent() {
     try {
       await proxyRequest({ action: "updateGroupClaimApproval", data: { groupId, requireClaimApproval } });
       alert("认领审核设置已保存");
-    } catch (err) {
+    } catch {
       alert("保存失败");
     } finally {
       setIsSaving(false);
@@ -485,8 +498,8 @@ function GroupSettingsContent() {
       const fetchedMembers = await queryProxy("Members", [["groupId", "==", groupId]]) as MemberData[];
       setMembers(fetchedMembers);
       await loadAuditLogs(true);
-    } catch (err: any) {
-      alert(err.message || "审核失败");
+    } catch (err: unknown) {
+      alert(getErrorMessage(err, "审核失败"));
     } finally {
       setIsSaving(false);
     }
@@ -818,7 +831,7 @@ function GroupSettingsContent() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">计算类型</label>
-                <select value={interestConfig.type} onChange={e => setInterestConfig({...interestConfig, type: e.target.value as any})} className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 focus:bg-white dark:focus:bg-gray-900 focus:ring-2 focus:ring-primary outline-none transition-all">
+                <select value={interestConfig.type} onChange={e => setInterestConfig({...interestConfig, type: e.target.value as InterestConfig["type"]})} className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 focus:bg-white dark:focus:bg-gray-900 focus:ring-2 focus:ring-primary outline-none transition-all">
                   <option value="none">无利息 (关闭)</option>
                   <option value="simple">单利 (仅按本金)</option>
                   <option value="compound">复利 (利滚利)</option>
@@ -827,7 +840,7 @@ function GroupSettingsContent() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">计算频率</label>
-                <select value={interestConfig.frequency} onChange={e => setInterestConfig({...interestConfig, frequency: e.target.value as any})} disabled={interestConfig.type === "none"} className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 focus:bg-white dark:focus:bg-gray-900 focus:ring-2 focus:ring-primary outline-none transition-all disabled:opacity-50">
+                <select value={interestConfig.frequency} onChange={e => setInterestConfig({...interestConfig, frequency: e.target.value as InterestConfig["frequency"]})} disabled={interestConfig.type === "none"} className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 focus:bg-white dark:focus:bg-gray-900 focus:ring-2 focus:ring-primary outline-none transition-all disabled:opacity-50">
                   <option value="none">暂不执行</option>
                   <option value="daily">每日</option>
                   <option value="weekly">每周</option>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { getErrorMessage } from "@/lib/error-message";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -25,8 +26,8 @@ export default function ForgotPasswordPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setMessage("重置密码邮件已发送，请检查您的收件箱");
-    } catch (err: any) {
-      setError(err.message || "发送失败，请检查邮箱地址是否正确");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "发送失败，请检查邮箱地址是否正确"));
     } finally {
       setIsLoading(false);
     }

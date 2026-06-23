@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { proxyRequest, queryProxy } from "@/lib/useFirestore";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -23,7 +23,7 @@ interface GroupData {
   creatorId: string;
   createdBy?: string;
   creatorName?: string;
-  createdAt: any;
+  createdAt: string;
 }
 
 interface MemberData {
@@ -51,11 +51,7 @@ export default function AdminPage() {
   const [isLoadingMembers, setIsLoadingMembers] = useState(false);
   const [isActionLoading, setIsActionLoading] = useState(false);
 
-  useEffect(() => {
-    fetchGlobalData();
-  }, []);
-
-  const fetchGlobalData = async () => {
+  const fetchGlobalData = useCallback(async () => {
     setIsLoading(true);
     try {
       // Fetch Users
@@ -81,7 +77,12 @@ export default function AdminPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void fetchGlobalData(), 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchGlobalData]);
 
   const handleManageGroup = async (group: GroupData) => {
     setSelectedGroup(group);

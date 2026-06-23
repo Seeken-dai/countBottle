@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useRouter } from "next/navigation";
@@ -14,16 +14,9 @@ interface Group {
   id: string;
   name: string;
   unit: string;
-  createdAt: any;
+  createdAt: string;
   role?: string;
   myBalance?: number;
-}
-
-interface Member {
-  id: string;
-  groupId: string;
-  role: string;
-  balance: number;
 }
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
