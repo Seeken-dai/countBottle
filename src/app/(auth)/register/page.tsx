@@ -2,9 +2,9 @@
 
 import { Suspense, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useAuth } from "@/lib/auth-context";
+import { useSearchParams } from "next/navigation";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { getSafeAppRedirect } from "@/lib/safe-redirect";
 
 function RegisterContent() {
   const [email, setEmail] = useState("");
@@ -12,11 +12,8 @@ function RegisterContent() {
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectUrl = searchParams.get("redirect") || "/dashboard";
-
-  const { mutateUser } = useAuth();
+  const redirectUrl = getSafeAppRedirect(searchParams.get("redirect"));
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,8 +35,7 @@ function RegisterContent() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      mutateUser();
-      router.push(redirectUrl);
+      window.location.replace(redirectUrl);
     } catch (err: any) {
       setError(err.message || "注册失败，该邮箱可能已被使用");
     } finally {

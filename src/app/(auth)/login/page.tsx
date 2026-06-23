@@ -2,20 +2,17 @@
 
 import { Suspense, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useAuth } from "@/lib/auth-context";
+import { useSearchParams } from "next/navigation";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { getSafeAppRedirect } from "@/lib/safe-redirect";
 
 function LoginContent() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectUrl = searchParams.get("redirect") || "/dashboard";
-
-  const { mutateUser } = useAuth();
+  const redirectUrl = getSafeAppRedirect(searchParams.get("redirect"));
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,8 +26,7 @@ function LoginContent() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      mutateUser();
-      router.push(redirectUrl);
+      window.location.replace(redirectUrl);
     } catch (err: any) {
       setError(err.message || "登录失败，请检查邮箱和密码");
     } finally {

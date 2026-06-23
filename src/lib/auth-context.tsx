@@ -54,9 +54,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (loading) return;
 
     const isAuthRoute = pathname?.startsWith('/login') || pathname?.startsWith('/register') || pathname?.startsWith('/forgot-password');
+    const isPublicInviteRoute = pathname === '/invite';
     if (user && isAuthRoute) {
       router.replace('/dashboard');
-    } else if (!user && !isAuthRoute && pathname !== '/') {
+    } else if (!user && !isAuthRoute && !isPublicInviteRoute && pathname !== '/') {
       router.replace('/login');
     }
   }, [user, loading, pathname, router]);

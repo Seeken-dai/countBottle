@@ -9,7 +9,7 @@ import { Suspense } from "react";
 
 function InviteContent() {
   const searchParams = useSearchParams();
-  const id = searchParams.get("id") as string;
+  const id = searchParams.get("id")?.trim() || "";
   const { user, loading } = useAuth();
   const router = useRouter();
   const [groupName, setGroupName] = useState<string>("");
@@ -18,9 +18,13 @@ function InviteContent() {
 
   useEffect(() => {
     if (loading) return;
+    if (!id) {
+      setError("邀请链接无效，请向群组管理员重新获取");
+      return;
+    }
     if (!user) {
-      // Not logged in, redirect to login with return url
-      router.replace(`/login?redirect=/invite?id=${id}`);
+      const inviteUrl = `/invite?id=${encodeURIComponent(id)}`;
+      router.replace(`/?redirect=${encodeURIComponent(inviteUrl)}`);
       return;
     }
 
@@ -65,7 +69,7 @@ function InviteContent() {
       }
     };
 
-    fetchGroupAndJoin();
+    void fetchGroupAndJoin();
   }, [user, loading, id, router]);
 
   if (error) {

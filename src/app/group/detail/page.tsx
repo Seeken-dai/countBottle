@@ -416,7 +416,7 @@ function GroupDetailsContent() {
         const category = (balance: number) => balance > 0 ? 0 : balance === 0 ? 1 : 2;
         const categoryDiff = category(a.balance) - category(b.balance);
         if (categoryDiff !== 0) return categoryDiff;
-        return a.balance >= 0 ? b.balance - a.balance : a.balance - b.balance;
+        return b.balance - a.balance;
       }
       const timeA = getTimeValue(a.createdAt);
       const timeB = getTimeValue(b.createdAt);
@@ -510,11 +510,13 @@ function GroupDetailsContent() {
     if (!previewImageFile || !canSharePreviewImage || isSharingPreviewImage) return;
     setIsSharingPreviewImage(true);
     try {
-      await navigator.share({
-        files: [previewImageFile],
-        title: `${group?.name || "群组"}排行榜长图`,
-        text: "来自 CountBottle 小聚记账的群组长图"
-      });
+      const shareData: ShareData = { files: [previewImageFile] };
+      if (typeof navigator.canShare !== "function" || !navigator.canShare(shareData)) {
+        setCanSharePreviewImage(false);
+        alert("当前浏览器不支持直接分享图片，请下载长图后分享。");
+        return;
+      }
+      await navigator.share(shareData);
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         console.error("Failed to share image:", error);
@@ -665,7 +667,7 @@ function GroupDetailsContent() {
                 onClick={() => { navigator.clipboard.writeText(window.location.origin + "/invite?id=" + groupId); alert("✅ 邀请链接已复制，快发给小伙伴吧！"); }}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
-                分享链接
+                复制邀请链接
               </div>
               <div 
                 className={`inline-flex items-center gap-2 text-xs bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 px-3 py-1.5 rounded-lg cursor-pointer transition-colors backdrop-blur-sm text-gray-700 dark:text-gray-200 ${isGenerating ? 'opacity-50 pointer-events-none' : ''}`}
@@ -1017,7 +1019,7 @@ function GroupDetailsContent() {
                 className="order-first col-span-2 flex items-center justify-center gap-2 rounded-xl bg-primary py-3 font-bold text-white shadow-lg shadow-primary/30 transition-colors hover:bg-primary/90 disabled:cursor-wait disabled:opacity-60"
               >
                 <Share2 className="h-5 w-5" aria-hidden="true" />
-                {isSharingPreviewImage ? "正在打开分享..." : "分享图片"}
+                {isSharingPreviewImage ? "正在打开分享..." : "分享长图图片"}
               </button>
             )}
             <button onClick={closePreviewImage} className="py-3 rounded-xl bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-white font-bold hover:bg-gray-300 dark:hover:bg-gray-700 transition-colors">

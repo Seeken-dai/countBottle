@@ -1,10 +1,18 @@
 "use client";
 
+import { Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AppFooter } from "@/components/app-footer";
+import { getSafeAppRedirect } from "@/lib/safe-redirect";
 
-export default function Home() {
+function HomeContent() {
+  const searchParams = useSearchParams();
+  const redirectUrl = getSafeAppRedirect(searchParams.get("redirect"), "");
+  const hasPendingInvite = redirectUrl.startsWith("/invite?");
+  const redirectQuery = hasPendingInvite ? `?redirect=${encodeURIComponent(redirectUrl)}` : "";
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-black flex flex-col relative overflow-hidden transition-colors duration-300">
       <div className="absolute top-4 right-4 z-50">
@@ -16,7 +24,9 @@ export default function Home() {
 
       <main className="flex-1 flex flex-col items-center justify-center p-6 text-center z-10">
         <div className="inline-block mb-4 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20">
-          <span className="text-sm font-semibold text-primary">小聚记账 Web 版 Beta</span>
+          <span className="text-sm font-semibold text-primary">
+            {hasPendingInvite ? "你收到一个群组邀请" : "小聚记账 Web 版 Beta"}
+          </span>
         </div>
 
         <h1 className="text-5xl md:text-7xl font-black text-gray-900 dark:text-white tracking-tight mb-6">
@@ -32,16 +42,16 @@ export default function Home() {
 
         <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md justify-center">
           <Link
-            href="/register"
+            href={`/register${redirectQuery}`}
             className="w-full sm:w-auto px-8 py-4 rounded-2xl text-base font-bold text-white bg-primary hover:bg-primary/90 focus:ring-4 focus:ring-primary/20 transition-all shadow-xl shadow-primary/30"
           >
-            免费开始使用
+            {hasPendingInvite ? "注册并加入群组" : "免费开始使用"}
           </Link>
           <Link
-            href="/login"
+            href={`/login${redirectQuery}`}
             className="w-full sm:w-auto px-8 py-4 rounded-2xl text-base font-bold text-gray-900 dark:text-white bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 focus:ring-4 focus:ring-gray-200 dark:focus:ring-gray-800 transition-all shadow-sm"
           >
-            登录账号
+            {hasPendingInvite ? "已有账号，登录后加入" : "登录账号"}
           </Link>
         </div>
       </main>
@@ -50,5 +60,13 @@ export default function Home() {
         <AppFooter />
       </div>
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 dark:bg-black" />}>
+      <HomeContent />
+    </Suspense>
   );
 }
