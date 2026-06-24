@@ -337,8 +337,8 @@ export default function AdminPage() {
                           <div className="text-xs text-gray-500 mt-1">
                             {member.userId ? (member.displayName ? `绑: ${member.displayName}` : "已绑定真实用户") : "空白卡片(未认领)"} 
                             {" · "}
-                            欠款: {getBalanceView(member.balance).debt}
-                            {getBalanceView(member.balance).hasCredit && <span className="ml-2 font-bold text-emerald-600 dark:text-emerald-400">抵扣额度: {getBalanceView(member.balance).credit}</span>}
+                            待结: {getBalanceView(member.balance).debt}
+                            {getBalanceView(member.balance).hasCredit && <span className="ml-2 font-bold text-emerald-600 dark:text-emerald-400">可抵扣: {getBalanceView(member.balance).credit}</span>}
                           </div>
                         </div>
                         <div className="flex gap-2">

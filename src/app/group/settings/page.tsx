@@ -82,7 +82,7 @@ type AuditCategory = Exclude<AuditFilter, "ALL">;
 
 const auditFilters: { value: AuditFilter; label: string }[] = [
   { value: "ALL", label: "全部" },
-  { value: "BALANCE", label: "余额变化" },
+  { value: "BALANCE", label: "数量变化" },
   { value: "MEMBER", label: "成员变更" },
   { value: "CLAIM", label: "认领审核" },
   { value: "SETTINGS", label: "群组设置" },
@@ -167,9 +167,9 @@ function getAuditCategory(type = ""): AuditCategory {
 
 function getAuditTag(log: AuditLog) {
   const tags: Record<string, string> = {
-    BALANCE_ADD: "余额增加",
-    BALANCE_DEDUCT: "余额核销",
-    BALANCE_SET: "余额调平",
+    BALANCE_ADD: "记入数量",
+    BALANCE_DEDUCT: "结算数量",
+    BALANCE_SET: "调整数量",
     MEMBER_ADDED: "新增成员",
     MEMBER_ROLE_UPDATED: "权限调整",
     MEMBER_NAME_UPDATED: "修改昵称",
@@ -212,9 +212,9 @@ function getAuditTitle(log: AuditLog) {
   if (log.displayTitle) return log.displayTitle;
   const targetName = log.targetName || "成员";
   const amount = typeof log.amount === "number" ? log.amount : log.metadata?.amount;
-  if (log.type === "BALANCE_ADD") return amount ? `给${targetName}记了一笔 +${amount}` : cleanLegacySummary(log.summary) || "记录了一笔增加";
-  if (log.type === "BALANCE_DEDUCT") return amount ? `为${targetName}核销了 ${amount}` : "核销了成员余额";
-  if (log.type === "BALANCE_SET") return typeof log.afterBalance === "number" ? `将${targetName}调为${formatBalanceState(log.afterBalance)}` : "调整了成员余额";
+  if (log.type === "BALANCE_ADD") return amount ? `为${targetName}记入了 ${amount}` : cleanLegacySummary(log.summary) || "记入了一笔数量";
+  if (log.type === "BALANCE_DEDUCT") return amount ? `为${targetName}结算了 ${amount}` : "结算了成员数量";
+  if (log.type === "BALANCE_SET") return typeof log.afterBalance === "number" ? `将${targetName}调整为${formatBalanceState(log.afterBalance)}` : "调整了成员数量";
   if (log.type === "MEMBER_NAME_UPDATED") return cleanLegacySummary(log.summary) || "修改了成员昵称";
   if (log.type === "INTEREST_SETTINGS_UPDATED") return "更新了计息规则";
   if (log.type === "INTEREST_APPLIED") return cleanLegacySummary(log.summary) || "系统完成自动计息";
@@ -479,7 +479,7 @@ function GroupSettingsContent() {
         const affected = Number(impact.affectedMemberCount || 0);
         const total = Number(impact.totalCredit || 0);
         const confirmed = confirm(
-          `确认关闭超额核销吗？\n\n将永久清空 ${affected} 名成员共 ${total} ${groupUnit}的抵扣额度。此操作不可撤销，但会保留完整流水。`
+          `确认关闭超额结算吗？\n\n将永久清空 ${affected} 名成员共 ${total} ${groupUnit}的可抵扣数量。此操作不可撤销，但会保留完整流水。`
         );
         if (!confirmed) return;
         setCreditBalanceStatus("disabling");
@@ -487,11 +487,11 @@ function GroupSettingsContent() {
         setCreditBalanceStatus("disabled");
         const fetchedMembers = await queryProxy("Members", [["groupId", "==", groupId]]) as MemberData[];
         setMembers(fetchedMembers);
-        alert("超额核销已关闭，抵扣额度已清理");
+        alert("超额结算已关闭，可抵扣数量已清理");
       } else {
         await proxyRequest({ action: "updateCreditBalanceStatus", data: { groupId, status: "enabled" } });
         setCreditBalanceStatus("enabled");
-        alert("超额核销已开启");
+        alert("超额结算已开启");
       }
       await loadAuditLogs(true);
     } catch (err: unknown) {
@@ -646,7 +646,7 @@ function GroupSettingsContent() {
             <span className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center mr-3">🛡️</span>
             子管理员配置
           </h2>
-          <p className="text-sm text-gray-500 mb-6">子管理员可以协助你记账、核销、以及拉新人，但无法解散群组、强制解绑、或修改基础规则。</p>
+          <p className="text-sm text-gray-500 mb-6">子管理员可以协助你记入、结算以及邀请新成员，但无法解散群组、强制解绑或修改基础规则。</p>
           
           <div className="space-y-3">
             {members.filter(m => m.userId && m.userId !== user?.uid).length === 0 ? (
@@ -687,16 +687,16 @@ function GroupSettingsContent() {
         <section className="bg-white dark:bg-gray-900 rounded-3xl p-6 md:p-8 border border-gray-200 dark:border-gray-800 shadow-sm">
           <h2 className="text-xl font-extrabold text-gray-900 dark:text-white mb-3 flex items-center">
             <span className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 flex items-center justify-center mr-3">抵</span>
-            抵扣额度
+            可抵扣数量
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
-            开启后，核销超过当前欠款的部分会成为抵扣额度，并自动抵扣未来新增债务。抵扣额度不参与计息。
+            开启后，结算超过当前待结的部分会成为可抵扣数量，并优先抵扣未来记入的数量。可抵扣数量不参与计息。
           </p>
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-800">
             <div>
-              <h3 className="font-bold text-gray-900 dark:text-white">允许超额核销</h3>
+              <h3 className="font-bold text-gray-900 dark:text-white">允许超额结算</h3>
               <p className="text-xs text-gray-500 mt-1">
-                {creditBalanceStatus === "enabled" ? "已开启，可产生抵扣额度。" : creditBalanceStatus === "disabling" ? "正在清理已有抵扣额度，可重试关闭操作。" : "已关闭，核销不能超过当前欠款。"}
+                {creditBalanceStatus === "enabled" ? "已开启，可产生可抵扣数量。" : creditBalanceStatus === "disabling" ? "正在清理已有可抵扣数量，可重试关闭操作。" : "已关闭，结算不能超过当前待结。"}
               </p>
             </div>
             <span className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-black ${creditBalanceStatus === "enabled" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" : creditBalanceStatus === "disabling" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"}`}>
@@ -704,7 +704,7 @@ function GroupSettingsContent() {
             </span>
           </div>
           <button type="button" onClick={handleCreditBalanceToggle} disabled={!isCreator || isSaving} className={`mt-4 w-full py-3 rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${creditBalanceStatus === "enabled" || creditBalanceStatus === "disabling" ? "bg-red-600 text-white hover:bg-red-700" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}>
-            {creditBalanceStatus === "enabled" ? "关闭并清空抵扣额度" : creditBalanceStatus === "disabling" ? "重试清理并关闭" : "开启超额核销"}
+            {creditBalanceStatus === "enabled" ? "关闭并清空可抵扣数量" : creditBalanceStatus === "disabling" ? "重试清理并关闭" : "开启超额结算"}
           </button>
           {!isCreator && <p className="text-xs text-gray-500 text-center mt-3">仅群主可以修改此设置。</p>}
         </section>
@@ -846,7 +846,7 @@ function GroupSettingsContent() {
                   <option value="none">无利息 (关闭)</option>
                   <option value="simple">单利 (仅按本金)</option>
                   <option value="compound">复利 (利滚利)</option>
-                  <option value="fixed">固定数量 (每期固定增加)</option>
+                  <option value="fixed">固定数量（每期固定记入）</option>
                 </select>
               </div>
               <div>
@@ -863,7 +863,7 @@ function GroupSettingsContent() {
             
             {interestConfig.type === "fixed" ? (
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">每期固定增加数量</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">每期固定记入数量</label>
                 <input type="number" min="0" step="0.01" value={interestConfig.fixedAmount ?? ""} onChange={e => setInterestConfig({...interestConfig, fixedAmount: e.target.value === '' ? '' : e.target.value})} className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 focus:bg-white dark:focus:bg-gray-900 focus:ring-2 focus:ring-primary outline-none transition-all disabled:opacity-50" />
               </div>
             ) : (

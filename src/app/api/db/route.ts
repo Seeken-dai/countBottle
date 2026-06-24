@@ -4,6 +4,7 @@ import { verifyUser } from "@/lib/auth-server";
 import { FieldValue, type DocumentData, type Query } from "firebase-admin/firestore";
 import { randomUUID } from "node:crypto";
 import { getDueInterestSchedule, normalizeInterestScheduleAnchor, type InterestFrequency } from "@/lib/interest-schedule";
+import { formatBalanceState } from "@/lib/balance-display";
 
 export const runtime = "nodejs";
 
@@ -612,7 +613,7 @@ export async function POST(request: Request) {
     else if (action === "getCreditBalanceDisableImpact") {
       const groupId = typeof data?.groupId === "string" ? data.groupId.trim() : "";
       if (!groupId || !(await isGroupOwner(groupId, user.uid))) {
-        return NextResponse.json({ error: "只有群主可以修改抵扣额度设置" }, { status: 403 });
+        return NextResponse.json({ error: "只有群主可以修改可抵扣数量设置" }, { status: 403 });
       }
       const membersSnap = await adminDb.collection("Members").where("groupId", "==", groupId).get();
       let affectedMemberCount = 0;
@@ -633,10 +634,10 @@ export async function POST(request: Request) {
       const groupId = typeof data?.groupId === "string" ? data.groupId.trim() : "";
       const nextStatus = data?.status;
       if (!groupId || !["enabled", "disabled"].includes(nextStatus)) {
-        return NextResponse.json({ error: "无效的抵扣额度设置" }, { status: 400 });
+        return NextResponse.json({ error: "无效的可抵扣数量设置" }, { status: 400 });
       }
       if (!(await isGroupOwner(groupId, user.uid))) {
-        return NextResponse.json({ error: "只有群主可以修改抵扣额度设置" }, { status: 403 });
+        return NextResponse.json({ error: "只有群主可以修改可抵扣数量设置" }, { status: 403 });
       }
 
       const groupRef = adminDb.collection("Groups").doc(groupId);
@@ -644,8 +645,8 @@ export async function POST(request: Request) {
         await adminDb.runTransaction(async (transaction) => {
           const groupDoc = await transaction.get(groupRef);
           if (!groupDoc.exists) throw new Error("群组不存在");
-          if (getGroupCreatorId(groupDoc.data()) !== user.uid) throw new Error("只有群主可以修改抵扣额度设置");
-          if (getCreditBalanceStatus(groupDoc.data()) === "disabling") throw new Error("抵扣额度正在清理，请稍后重试");
+          if (getGroupCreatorId(groupDoc.data()) !== user.uid) throw new Error("只有群主可以修改可抵扣数量设置");
+          if (getCreditBalanceStatus(groupDoc.data()) === "disabling") throw new Error("可抵扣数量正在清理，请稍后重试");
           transaction.update(groupRef, {
             creditBalanceStatus: "enabled",
             updatedAt: FieldValue.serverTimestamp()
@@ -657,10 +658,10 @@ export async function POST(request: Request) {
           type: "CREDIT_BALANCE_SETTING_UPDATED",
           targetType: "group",
           targetId: groupId,
-          summary: "开启超额核销",
+          summary: "开启超额结算",
           actorName,
-          displayTitle: `${actorName}开启了超额核销`,
-          displayDetail: "核销超过当前欠款的部分将转为抵扣额度，用于抵扣未来新增债务。"
+          displayTitle: `${actorName}开启了超额结算`,
+          displayDetail: "结算超过当前待结的部分将转为可抵扣数量，用于抵扣未来记入的数量。"
         });
         return NextResponse.json({ success: true, status: "enabled" });
       }
@@ -668,7 +669,7 @@ export async function POST(request: Request) {
       await adminDb.runTransaction(async (transaction) => {
         const groupDoc = await transaction.get(groupRef);
         if (!groupDoc.exists) throw new Error("群组不存在");
-        if (getGroupCreatorId(groupDoc.data()) !== user.uid) throw new Error("只有群主可以修改抵扣额度设置");
+        if (getGroupCreatorId(groupDoc.data()) !== user.uid) throw new Error("只有群主可以修改可抵扣数量设置");
         transaction.update(groupRef, {
           creditBalanceStatus: "disabling",
           updatedAt: FieldValue.serverTimestamp()
@@ -701,7 +702,7 @@ export async function POST(request: Request) {
             beforeBalance,
             afterBalance: 0,
             reason: "CREDIT_BALANCE_FEATURE_DISABLED",
-            note: "关闭超额核销时清理抵扣额度",
+            note: "关闭超额结算时清理可抵扣数量",
             createdAt: FieldValue.serverTimestamp()
           });
           transaction.set(adminDb.collection("AuditLogs").doc(), {
@@ -710,16 +711,16 @@ export async function POST(request: Request) {
             type: "BALANCE_SET",
             targetType: "member",
             targetId: memberDoc.id,
-            summary: "关闭超额核销并清理抵扣额度",
+            summary: "关闭超额结算并清理可抵扣数量",
             metadata: { reason: "CREDIT_BALANCE_FEATURE_DISABLED", clearedCredit: credit },
             actorName,
             targetName: memberName,
             amount: 0,
             beforeBalance,
             afterBalance: 0,
-            note: "关闭超额核销时清理抵扣额度",
-            displayTitle: `${actorName}清除了${memberName}的抵扣额度 ${credit}`,
-            displayDetail: `抵扣额度从 ${credit} 调整为 0`,
+            note: "关闭超额结算时清理可抵扣数量",
+            displayTitle: `${actorName}清除了${memberName}的可抵扣数量 ${credit}`,
+            displayDetail: `可抵扣数量从 ${credit} 调整为 0`,
             createdAt: FieldValue.serverTimestamp()
           });
           return credit;
@@ -740,11 +741,11 @@ export async function POST(request: Request) {
         type: "CREDIT_BALANCE_SETTING_UPDATED",
         targetType: "group",
         targetId: groupId,
-        summary: "关闭超额核销",
+        summary: "关闭超额结算",
         metadata: { clearedMemberCount, clearedCreditTotal },
         actorName,
-        displayTitle: `${actorName}关闭了超额核销`,
-        displayDetail: `已清理 ${clearedMemberCount} 名成员的抵扣额度，共 ${Number(clearedCreditTotal.toFixed(2))}`
+        displayTitle: `${actorName}关闭了超额结算`,
+        displayDetail: `已清理 ${clearedMemberCount} 名成员的可抵扣数量，共 ${Number(clearedCreditTotal.toFixed(2))}`
       });
       return NextResponse.json({
         success: true,
@@ -968,15 +969,15 @@ export async function POST(request: Request) {
           type: "BALANCE_ADD",
           targetType: "member",
           targetId: memberId,
-          summary: "快速增加 1",
+          summary: "快速记入 1",
           metadata: { amount: 1, operationId },
           actorName,
           targetName: memberName,
           amount: 1,
           beforeBalance,
           afterBalance,
-          displayTitle: `${actorName}给${memberName}快速记了一笔 +1`,
-          displayDetail: `余额从 ${beforeBalance} 调整为 ${afterBalance}`
+          displayTitle: `${actorName}为${memberName}快速记入了 1`,
+          displayDetail: `${formatBalanceState(beforeBalance)} → ${formatBalanceState(afterBalance)}`
         }));
         transaction.set(operationRef, {
           operationId,
@@ -1059,12 +1060,12 @@ export async function POST(request: Request) {
           effectiveDebtDeducted = Math.min(amount, Math.max(currentBalance, 0));
           newBalance -= amount;
           if (newBalance < 0 && getCreditBalanceStatus(groupDoc.data()) !== "enabled") {
-            throw new Error("当前群组未开启超额核销，核销数量不能超过当前欠款");
+            throw new Error("当前群组未开启超额结算，结算数量不能超过当前待结");
           }
         } else if (recordActionType === "SET") {
           newBalance = balanceMode === "CREDIT" ? -amount : amount;
           if (newBalance < 0 && getCreditBalanceStatus(groupDoc.data()) !== "enabled") {
-            throw new Error("当前群组未开启超额核销，不能设置抵扣额度");
+            throw new Error("当前群组未开启超额结算，不能设置可抵扣数量");
           }
           const debtIncrease = Math.max(newBalance, 0) - Math.max(currentBalance, 0);
           if (debtIncrease > 0) newTotalAdded += debtIncrease;
@@ -1091,19 +1092,19 @@ export async function POST(request: Request) {
           createdAt: FieldValue.serverTimestamp()
         });
         const actionTitle = recordActionType === "ADD"
-          ? `${actorName}给${memberName}记了一笔 +${amount}`
+          ? `${actorName}为${memberName}记入了 ${amount}`
           : recordActionType === "DEDUCT"
-            ? `${actorName}为${memberName}核销了 ${amount}`
+            ? `${actorName}为${memberName}结算了 ${amount}`
             : afterBalance < 0
-              ? `${actorName}将${memberName}调为抵扣额度 ${-afterBalance}`
-              : `${actorName}将${memberName}欠款调为 ${afterBalance}`;
+              ? `${actorName}将${memberName}调整为可抵扣 ${-afterBalance}`
+              : `${actorName}将${memberName}待结数量调整为 ${afterBalance}`;
         transaction.set(auditRef, buildAuditLogData({
           groupId,
           operatorId: user.uid,
           type: recordActionType === "ADD" ? "BALANCE_ADD" : recordActionType === "DEDUCT" ? "BALANCE_DEDUCT" : "BALANCE_SET",
           targetType: "member",
           targetId: memberId,
-          summary: `调整成员余额：${recordActionType}`,
+          summary: `调整成员数量：${recordActionType}`,
           metadata: {
             amount,
             effectiveDebtDeducted,
@@ -1119,8 +1120,8 @@ export async function POST(request: Request) {
           note: cleanedNote,
           displayTitle: actionTitle,
           displayDetail: afterBalance < 0
-            ? `调整后欠款为 0，抵扣额度为 ${-afterBalance}`
-            : `调整后欠款为 ${afterBalance}，抵扣额度为 0`
+            ? `调整后待结为 0，可抵扣为 ${-afterBalance}`
+            : `调整后待结为 ${afterBalance}，可抵扣为 0`
         }));
         transaction.set(operationRef, {
           operationId,
@@ -1375,7 +1376,7 @@ export async function POST(request: Request) {
           },
           actorName: "系统",
           amount: totalInterest,
-          displayTitle: `系统完成自动计息，共 ${appliedMemberCount} 名成员增加 ${totalInterest}`,
+          displayTitle: `系统完成自动计息，共为 ${appliedMemberCount} 名成员记入 ${totalInterest}`,
           displayDetail: `结息周期：${appliedPeriods}；首次触发：${appliedFromIso.slice(0, 16).replace("T", " ") || "-"}；结算到：${appliedToIso.slice(0, 16).replace("T", " ") || "-"}；下次计息：${nextInterestIso.slice(0, 16).replace("T", " ") || "-"}`
         });
       }

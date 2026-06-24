@@ -17,5 +17,5 @@ export function getBalanceView(value: unknown): BalanceView {
 export function formatBalanceState(value: unknown, unit = "") {
   const { debt, credit, hasCredit } = getBalanceView(value);
   const suffix = unit ? ` ${unit}` : "";
-  return hasCredit ? `欠款 0${suffix}；抵扣额度 ${credit}${suffix}` : `欠款 ${debt}${suffix}`;
+  return hasCredit ? `待结 0${suffix}；可抵扣 ${credit}${suffix}` : `待结 ${debt}${suffix}`;
 }

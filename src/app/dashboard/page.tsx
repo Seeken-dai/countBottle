@@ -182,7 +182,7 @@ export default function DashboardPage() {
                 
                 <div className="flex items-end justify-between relative z-10 mt-6">
                   <div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">我的欠款</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">我的待结</p>
                     <div className="flex items-baseline gap-1">
                       <span className="text-3xl font-black text-gray-900 dark:text-white leading-none">
                         {balanceView.debt}
@@ -191,7 +191,7 @@ export default function DashboardPage() {
                         {group.unit}
                       </span>
                     </div>
-                    {balanceView.hasCredit && <p className="mt-2 text-xs font-bold text-emerald-600 dark:text-emerald-400">抵扣额度 {balanceView.credit} {group.unit}</p>}
+                    {balanceView.hasCredit && <p className="mt-2 text-xs font-bold text-emerald-600 dark:text-emerald-400">可抵扣 {balanceView.credit} {group.unit}</p>}
                   </div>
                   <div className="w-10 h-10 rounded-full bg-gray-50 dark:bg-gray-800 flex items-center justify-center group-hover:bg-primary group-hover:text-white text-gray-400 transition-colors">
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>

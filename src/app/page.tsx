@@ -37,7 +37,7 @@ function HomeContent() {
         </h1>
 
         <p className="text-lg md:text-xl text-gray-600 dark:text-gray-400 max-w-2xl mb-10">
-          专为熟人聚会、桌游娱乐等线下场景打造的极简记账工具。轻松记录物品数量、积分或欠数，再也不用担心算不清账。
+          专为熟人聚会、桌游娱乐等线下场景打造的极简记账工具。轻松记录物品数量、积分或待结数量，再也不用担心算不清账。
         </p>
 
         <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md justify-center">

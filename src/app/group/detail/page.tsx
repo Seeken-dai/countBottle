@@ -724,11 +724,11 @@ function GroupDetailsContent() {
 
             <div className="mt-6 grid grid-cols-2 gap-4">
               <div className="bg-gray-50 dark:bg-white/5 backdrop-blur-sm border border-gray-200 dark:border-white/10 rounded-xl p-4">
-                <div className="text-xs text-gray-500 dark:text-white/70 mb-1">剩余总数</div>
+                <div className="text-xs text-gray-500 dark:text-white/70 mb-1">待结总数</div>
                 <div className="text-2xl font-black text-gray-900 dark:text-white"><AnimatedNumber value={remainingTotal} /> <span className="text-sm font-medium text-gray-500 dark:text-white/70">{group.unit}</span></div>
               </div>
               <div className="bg-gray-50 dark:bg-white/5 backdrop-blur-sm border border-gray-200 dark:border-white/10 rounded-xl p-4">
-                <div className="text-xs text-gray-500 dark:text-white/70 mb-1">累计增加</div>
+                <div className="text-xs text-gray-500 dark:text-white/70 mb-1">累计记入</div>
                 <div className="text-2xl font-black text-gray-900 dark:text-white"><AnimatedNumber value={cumulativeTotal} /> <span className="text-sm font-medium text-gray-500 dark:text-white/70">{group.unit}</span></div>
               </div>
             </div>
@@ -740,12 +740,12 @@ function GroupDetailsContent() {
                     type="button"
                     onClick={() => setActiveRankingType("add")}
                     className="group flex min-w-0 items-center justify-between rounded-xl border border-gray-200 bg-gray-50 p-4 text-left transition-all hover:border-emerald-300 hover:bg-emerald-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:border-white/10 dark:bg-white/5 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/20"
-                    aria-label={`查看近 7 天新增排行榜，第一名 ${weeklyRankings.add[0].name}`}
+                    aria-label={`查看近 7 天记入排行榜，第一名 ${weeklyRankings.add[0].name}`}
                   >
                     <div className="min-w-0">
                       <div className="mb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-white/70">
                         <ArrowUpRight className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
-                        近 7 天新增最多
+                        近 7 天记入最多
                       </div>
                       <div className="truncate text-base font-black text-gray-900 dark:text-white">{weeklyRankings.add[0].name}</div>
                     </div>
@@ -760,12 +760,12 @@ function GroupDetailsContent() {
                     type="button"
                     onClick={() => setActiveRankingType("deduct")}
                     className="group flex min-w-0 items-center justify-between rounded-xl border border-gray-200 bg-gray-50 p-4 text-left transition-all hover:border-orange-300 hover:bg-orange-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 dark:border-white/10 dark:bg-white/5 dark:hover:border-orange-700 dark:hover:bg-orange-950/20"
-                    aria-label={`查看近 7 天核销排行榜，第一名 ${weeklyRankings.deduct[0].name}`}
+                    aria-label={`查看近 7 天结算排行榜，第一名 ${weeklyRankings.deduct[0].name}`}
                   >
                     <div className="min-w-0">
                       <div className="mb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-white/70">
                         <ArrowDownRight className="h-3.5 w-3.5 text-orange-500" aria-hidden="true" />
-                        近 7 天核销最多
+                        近 7 天结算最多
                       </div>
                       <div className="truncate text-base font-black text-gray-900 dark:text-white">{weeklyRankings.deduct[0].name}</div>
                     </div>
@@ -866,12 +866,12 @@ function GroupDetailsContent() {
                   {/* Right: Balance and Actions */}
                   <div className="flex items-center justify-end gap-3 sm:gap-6 shrink-0">
                     <div className="text-right flex flex-col justify-center">
-                      <div className="hidden sm:block text-xs text-gray-500 dark:text-gray-400 mb-0.5">{balanceView.hasCredit ? "当前无欠款" : "当前欠款"}</div>
+                      <div className="hidden sm:block text-xs text-gray-500 dark:text-gray-400 mb-0.5">{balanceView.hasCredit ? "当前无待结" : "当前待结"}</div>
                       <div className="flex items-baseline gap-0.5 sm:gap-1">
                         <span className="text-xl sm:text-3xl font-black text-gray-900 dark:text-white leading-none"><AnimatedNumber value={balanceView.debt} /></span>
                         <span className="text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400">{group.unit}</span>
                       </div>
-                      {balanceView.hasCredit && <div className="mt-1 text-[10px] sm:text-xs font-bold text-emerald-600 dark:text-emerald-400">抵扣额度 <span className="tabular-nums">{balanceView.credit}</span> {group.unit}</div>}
+                      {balanceView.hasCredit && <div className="mt-1 text-[10px] sm:text-xs font-bold text-emerald-600 dark:text-emerald-400">可抵扣 <span className="tabular-nums">{balanceView.credit}</span> {group.unit}</div>}
                     </div>
                     
                     <div className="w-12 sm:w-16 flex justify-end shrink-0 relative">
@@ -880,7 +880,7 @@ function GroupDetailsContent() {
                           type="button"
                           onClick={(e) => handleQuickAdd(member.id, e)}
                           disabled={pendingQuickAddMemberIds.has(member.id)}
-                          aria-label={pendingQuickAddMemberIds.has(member.id) ? `正在为${member.remarkName}增加 1` : `为${member.remarkName}增加 1`}
+                          aria-label={pendingQuickAddMemberIds.has(member.id) ? `正在为${member.remarkName}记入 1` : `为${member.remarkName}记入 1`}
                           aria-busy={pendingQuickAddMemberIds.has(member.id)}
                           className="relative z-10 flex h-8 w-10 items-center justify-center rounded-lg bg-primary text-base font-black text-white transition-all hover:-translate-y-1 hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/30 active:scale-95 disabled:cursor-wait disabled:opacity-70 disabled:hover:translate-y-0 sm:h-12 sm:w-12 sm:rounded-xl sm:text-lg"
                         >
@@ -927,8 +927,8 @@ function GroupDetailsContent() {
             <div className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-2xl flex justify-between items-center">
               <div>
                 <h4 className="text-lg font-bold text-gray-900 dark:text-white">{selectedMember.remarkName}</h4>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">当前欠款: <span className="font-black text-gray-900 dark:text-white text-lg"><AnimatedNumber value={getBalanceView(selectedMember.balance).debt} /></span> {group.unit}</p>
-                {getBalanceView(selectedMember.balance).hasCredit && <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400 mt-1">抵扣额度: {getBalanceView(selectedMember.balance).credit} {group.unit}</p>}
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">当前待结: <span className="font-black text-gray-900 dark:text-white text-lg"><AnimatedNumber value={getBalanceView(selectedMember.balance).debt} /></span> {group.unit}</p>
+                {getBalanceView(selectedMember.balance).hasCredit && <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400 mt-1">可抵扣: {getBalanceView(selectedMember.balance).credit} {group.unit}</p>}
               </div>
               <div className="w-12 h-12 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center font-bold text-gray-600 dark:text-gray-300">{selectedMember.remarkName.charAt(0)}</div>
             </div>
@@ -936,17 +936,22 @@ function GroupDetailsContent() {
             {(isAdmin || selectedMember.userId === user?.uid) && (
               <form onSubmit={handleRecordSubmit} className="min-w-0 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-4 rounded-2xl shadow-sm space-y-4">
                 <div className="grid grid-cols-3 gap-2">
-                  <button type="button" onClick={() => selectRecordActionType("ADD")} className={`min-w-0 px-2 py-2 text-xs sm:text-sm leading-tight font-bold rounded-lg transition-colors ${recordActionType === "ADD" ? "bg-primary text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>记一笔 (+)</button>
-                  {isAdmin && <button type="button" onClick={() => selectRecordActionType("DEDUCT")} className={`min-w-0 px-2 py-2 text-xs sm:text-sm leading-tight font-bold rounded-lg transition-colors ${recordActionType === "DEDUCT" ? "bg-orange-500 text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>核销 (-)</button>}
-                  {isAdmin && <button type="button" onClick={() => selectRecordActionType("SET")} className={`min-w-0 px-2 py-2 text-xs sm:text-sm leading-tight font-bold rounded-lg transition-colors ${recordActionType === "SET" ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>强制调平 (=)</button>}
+                  <button type="button" onClick={() => selectRecordActionType("ADD")} className={`min-w-0 px-2 py-2 text-xs sm:text-sm leading-tight font-bold rounded-lg transition-colors ${recordActionType === "ADD" ? "bg-primary text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>记入 (+)</button>
+                  {isAdmin && <button type="button" onClick={() => selectRecordActionType("DEDUCT")} className={`min-w-0 px-2 py-2 text-xs sm:text-sm leading-tight font-bold rounded-lg transition-colors ${recordActionType === "DEDUCT" ? "bg-orange-500 text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>结算 (-)</button>}
+                  {isAdmin && <button type="button" onClick={() => selectRecordActionType("SET")} className={`min-w-0 px-2 py-2 text-xs sm:text-sm leading-tight font-bold rounded-lg transition-colors ${recordActionType === "SET" ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>调整数量 (=)</button>}
                 </div>
+                <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+                  {recordActionType === "ADD" && "记入新的待结数量；如有可抵扣数量，将优先抵扣。"}
+                  {recordActionType === "DEDUCT" && "减少当前待结数量；超出部分将转为可抵扣数量。"}
+                  {recordActionType === "SET" && "直接调整成员当前的待结或可抵扣数量。"}
+                </p>
                 {recordActionType === "SET" && (
-                  <div className="grid grid-cols-2 gap-2" role="group" aria-label="调平目标状态">
-                    <button type="button" onClick={() => setRecordBalanceMode("DEBT")} className={`py-2 rounded-lg text-sm font-bold transition-colors ${recordBalanceMode === "DEBT" ? "bg-gray-900 text-white dark:bg-white dark:text-gray-900" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}`}>设为欠款</button>
-                    <button type="button" onClick={() => setRecordBalanceMode("CREDIT")} disabled={group.creditBalanceStatus !== "enabled"} className={`py-2 rounded-lg text-sm font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${recordBalanceMode === "CREDIT" ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300"}`}>设为抵扣额度</button>
+                  <div className="grid grid-cols-2 gap-2" role="group" aria-label="调整后的数量状态">
+                    <button type="button" onClick={() => setRecordBalanceMode("DEBT")} className={`py-2 rounded-lg text-sm font-bold transition-colors ${recordBalanceMode === "DEBT" ? "bg-gray-900 text-white dark:bg-white dark:text-gray-900" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}`}>设为待结</button>
+                    <button type="button" onClick={() => setRecordBalanceMode("CREDIT")} disabled={group.creditBalanceStatus !== "enabled"} className={`py-2 rounded-lg text-sm font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${recordBalanceMode === "CREDIT" ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300"}`}>设为可抵扣</button>
                   </div>
                 )}
-                {recordActionType === "SET" && group.creditBalanceStatus !== "enabled" && <p className="text-xs text-gray-500">群主开启超额核销后，才可调平为抵扣额度。</p>}
+                {recordActionType === "SET" && group.creditBalanceStatus !== "enabled" && <p className="text-xs text-gray-500">群主开启超额结算后，才可调整为可抵扣数量。</p>}
                 <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-3">
                   <input type="number" required min={0} value={recordAmount} onChange={(e) => setRecordAmount(e.target.value)} placeholder="输入数量" className="w-full min-w-0 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-2 focus:ring-primary text-base" />
                 </div>
@@ -963,9 +968,9 @@ function GroupDetailsContent() {
                     <div key={record.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800/30 rounded-xl border border-gray-100 dark:border-gray-800">
                       <div className="flex flex-col">
                         <span className="text-sm font-medium text-gray-900 dark:text-white">
-                          {record.type === "ADD" && "增加"}
-                          {record.type === "DEDUCT" && "核销"}
-                          {record.type === "SET" && (record.balanceMode === "CREDIT" || Number(record.afterBalance) < 0 ? "强制调平为抵扣额度" : "强制调平为欠款")}
+                          {record.type === "ADD" && "记入"}
+                          {record.type === "DEDUCT" && "结算"}
+                          {record.type === "SET" && (record.balanceMode === "CREDIT" || Number(record.afterBalance) < 0 ? "调整为可抵扣" : "调整为待结")}
                           {record.type === "INTEREST" && "自动计息"}
                         </span>
                         <span className="text-xs text-gray-500 mt-1">{record.createdAt ? new Date(getTimeValue(record.createdAt)).toLocaleString() : "刚刚"}</span>
@@ -1029,13 +1034,13 @@ function GroupDetailsContent() {
       <Modal
         isOpen={activeRankingType !== null}
         onClose={() => setActiveRankingType(null)}
-        title={activeRankingType === "deduct" ? "近 7 天核销排行榜" : "近 7 天新增排行榜"}
+        title={activeRankingType === "deduct" ? "近 7 天结算排行榜" : "近 7 天记入排行榜"}
         maxWidth="lg"
       >
         {activeRankingType && weeklyRankings && (
           <div>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              含今天在内的 7 个自然日。仅统计记账与实际消除欠款的核销数量；调平及形成抵扣额度的部分不计入排行。
+              含今天在内的 7 个自然日。仅统计记入与实际减少待结的结算数量；调整数量及转为可抵扣的部分不计入排行。
             </p>
             <RankingPodium entries={weeklyRankings[activeRankingType]} unit={group.unit} />
           </div>
@@ -1084,11 +1089,11 @@ function GroupDetailsContent() {
           
           <div className="bg-gray-900 dark:bg-primary/20 rounded-2xl p-4 text-white flex justify-between">
             <div className="text-center flex-1 border-r border-white/10">
-              <div className="text-[10px] text-white/60 mb-1">剩余总数 ({group?.unit})</div>
+              <div className="text-[10px] text-white/60 mb-1">待结总数 ({group?.unit})</div>
               <div className="text-xl font-black">{remainingTotal}</div>
             </div>
             <div className="text-center flex-1">
-              <div className="text-[10px] text-white/60 mb-1">累计增加 ({group?.unit})</div>
+              <div className="text-[10px] text-white/60 mb-1">累计记入 ({group?.unit})</div>
               <div className="text-xl font-black">{cumulativeTotal}</div>
             </div>
           </div>
@@ -1108,7 +1113,7 @@ function GroupDetailsContent() {
                 </div>
                 <div className="text-right" title={formatBalanceState(member.balance, group?.unit)}>
                   <div><span className="text-xl font-black text-gray-900 dark:text-white">{getBalanceView(member.balance).debt}</span></div>
-                  {getBalanceView(member.balance).hasCredit && <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400">抵扣额度 {getBalanceView(member.balance).credit}</div>}
+                  {getBalanceView(member.balance).hasCredit && <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400">可抵扣 {getBalanceView(member.balance).credit}</div>}
                 </div>
               </div>
             ))}
