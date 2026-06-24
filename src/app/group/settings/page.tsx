@@ -250,6 +250,19 @@ function GroupSettingsContent() {
   const [isCreator, setIsCreator] = useState(false);
   const [groupCreatorId, setGroupCreatorId] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const savingLockRef = useRef(false);
+
+  const beginSaving = () => {
+    if (savingLockRef.current) return false;
+    savingLockRef.current = true;
+    setIsSaving(true);
+    return true;
+  };
+
+  const finishSaving = () => {
+    savingLockRef.current = false;
+    setIsSaving(false);
+  };
 
   const [groupName, setGroupName] = useState("");
   const [groupUnit, setGroupUnit] = useState("");
@@ -383,13 +396,12 @@ function GroupSettingsContent() {
 
   const handleSaveBasic = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!groupName.trim() || !groupUnit.trim()) return;
-    setIsSaving(true);
+    if (!groupName.trim() || !groupUnit.trim() || !beginSaving()) return;
     try {
       await proxyRequest({ action: "updateGroupBasic", data: { groupId, name: groupName.trim(), unit: groupUnit.trim(), announcement: announcementText.trim() } });
       alert("基础设置已保存");
     } catch { alert("保存失败"); }
-    finally { setIsSaving(false); }
+    finally { finishSaving(); }
   };
 
   const handleSaveInterest = async (e: React.FormEvent) => {
@@ -406,7 +418,7 @@ function GroupSettingsContent() {
       alert("下一次计息时间必须设置为当前或未来时间");
       return;
     }
-    setIsSaving(true);
+    if (!beginSaving()) return;
     try {
       await proxyRequest({ action: "updateGroupInterest", data: { groupId,
         interestConfig: {
@@ -421,7 +433,7 @@ function GroupSettingsContent() {
       setInterestConfig(prev => ({ ...prev, nextInterestAt, lastCalculatedAt: null, scheduleAnchor }));
       alert("计息设置已保存");
     } catch (err: unknown) { alert(err instanceof Error ? err.message : "保存失败"); }
-    finally { setIsSaving(false); }
+    finally { finishSaving(); }
   };
 
   const handleDeleteGroup = async () => {
@@ -434,31 +446,30 @@ function GroupSettingsContent() {
       return;
     }
 
-    setIsSaving(true);
+    if (!beginSaving()) return;
     try {
       await proxyRequest({ action: "batchDeleteGroup", docId: groupId });
       router.push("/dashboard");
     } catch {
       alert("删除失败");
-      setIsSaving(false);
+      finishSaving();
     }
   };
 
   const handleSaveClaimApproval = async () => {
-    setIsSaving(true);
+    if (!beginSaving()) return;
     try {
       await proxyRequest({ action: "updateGroupClaimApproval", data: { groupId, requireClaimApproval } });
       alert("认领审核设置已保存");
     } catch {
       alert("保存失败");
     } finally {
-      setIsSaving(false);
+      finishSaving();
     }
   };
 
   const handleCreditBalanceToggle = async () => {
-    if (!isCreator || isSaving) return;
-    setIsSaving(true);
+    if (!isCreator || !beginSaving()) return;
     try {
       if (creditBalanceStatus === "enabled" || creditBalanceStatus === "disabling") {
         const impact = await proxyRequest({
@@ -486,12 +497,12 @@ function GroupSettingsContent() {
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "设置失败，请重试");
     } finally {
-      setIsSaving(false);
+      finishSaving();
     }
   };
 
   const handleReviewClaim = async (request: ClaimRequest, decision: "APPROVED" | "REJECTED") => {
-    setIsSaving(true);
+    if (!beginSaving()) return;
     try {
       await proxyRequest({ action: "reviewClaim", data: { requestId: request.id, decision } });
       setClaimRequests(prev => prev.filter(item => item.id !== request.id));
@@ -501,7 +512,7 @@ function GroupSettingsContent() {
     } catch (err: unknown) {
       alert(getErrorMessage(err, "审核失败"));
     } finally {
-      setIsSaving(false);
+      finishSaving();
     }
   };
 
@@ -623,8 +634,8 @@ function GroupSettingsContent() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">群组公告</label>
               <textarea value={announcementText} onChange={e => setAnnouncementText(e.target.value)} rows={3} className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 focus:bg-white dark:focus:bg-gray-900 focus:ring-2 focus:ring-primary outline-none transition-all resize-none" placeholder="选填，写点给群成员看的话吧..." />
             </div>
-            <button type="submit" disabled={isSaving} className="w-full py-3 rounded-xl font-bold text-white bg-gray-900 dark:bg-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors disabled:opacity-50">
-              保存基础设置
+            <button type="submit" disabled={isSaving} aria-busy={isSaving} className="w-full py-3 rounded-xl font-bold text-white bg-gray-900 dark:bg-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors disabled:cursor-wait disabled:opacity-60">
+              {isSaving ? "保存中..." : "保存基础设置"}
             </button>
           </form>
         </section>
@@ -714,8 +725,8 @@ function GroupSettingsContent() {
               {requireClaimApproval ? "已开启" : "已关闭"}
             </label>
           </div>
-          <button type="button" onClick={handleSaveClaimApproval} disabled={isSaving} className="mt-4 w-full py-3 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 transition-colors disabled:opacity-50">
-            保存认领设置
+          <button type="button" onClick={handleSaveClaimApproval} disabled={isSaving} aria-busy={isSaving} className="mt-4 w-full py-3 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 transition-colors disabled:cursor-wait disabled:opacity-60">
+            {isSaving ? "保存中..." : "保存认领设置"}
           </button>
 
           <div className="mt-6">
@@ -888,8 +899,8 @@ function GroupSettingsContent() {
 
             {renderPreview()}
 
-            <button type="submit" disabled={isSaving} className="w-full py-3 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 transition-colors disabled:opacity-50">
-              保存计息规则
+            <button type="submit" disabled={isSaving} aria-busy={isSaving} className="w-full py-3 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 transition-colors disabled:cursor-wait disabled:opacity-60">
+              {isSaving ? "保存中..." : "保存计息规则"}
             </button>
           </form>
         </section>

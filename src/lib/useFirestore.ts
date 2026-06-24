@@ -2,6 +2,8 @@ import useSWR from "swr";
 
 type ProxyResponse = Record<string, unknown>;
 
+export const createOperationId = () => globalThis.crypto.randomUUID();
+
 export const proxyRequest = async <T = ProxyResponse>(body: Record<string, unknown>): Promise<T> => {
   const res = await fetch("/api/db", {
     method: "POST",

@@ -3,13 +3,13 @@
 import { useState } from "react";
 import { Modal } from "@/components/ui/modal";
 
-const VERSION = "1.5.1";
+const VERSION = "1.5.2";
 
 const releaseNotes = [
-  "清理全项目 ESLint 错误和警告，恢复代码质量检查。",
-  "收紧 API、Firestore 与页面数据类型，减少运行时字段错误。",
-  "优化 Hook 状态同步与依赖关系，降低重复渲染和旧数据风险。",
-  "部署前新增强制 lint 与类型检查，防止质量问题再次积累。"
+  "点击快捷 +1、记账或保存后，会立即显示处理中。",
+  "快捷 +1 会在操作真正完成后再显示成功动画。",
+  "网络较慢或请求重复时，同一次记账不会意外生效多次。",
+  "单个成员正在快捷操作时，不会影响其他成员。"
 ];
 
 export function AppFooter() {

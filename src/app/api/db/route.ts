@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase-admin";
 import { verifyUser } from "@/lib/auth-server";
 import { FieldValue, type DocumentData, type Query } from "firebase-admin/firestore";
+import { randomUUID } from "node:crypto";
 import { getDueInterestSchedule, normalizeInterestScheduleAnchor, type InterestFrequency } from "@/lib/interest-schedule";
 
 export const runtime = "nodejs";
@@ -184,6 +185,67 @@ function getRoleDisplayName(role: string) {
   return "普通成员";
 }
 
+function getOperationId(value: unknown) {
+  // Keep already-open pre-V1.5.2 clients working during the deployment transition.
+  if (value === undefined) return randomUUID();
+  if (typeof value !== "string") return null;
+  const operationId = value.trim();
+  return /^[A-Za-z0-9_-]{16,100}$/.test(operationId) ? operationId : null;
+}
+
+function buildAuditLogData({
+  groupId,
+  operatorId,
+  type,
+  targetType,
+  targetId,
+  summary,
+  metadata = {},
+  actorName,
+  targetName,
+  amount,
+  beforeBalance,
+  afterBalance,
+  note,
+  displayTitle,
+  displayDetail
+}: {
+  groupId: string;
+  operatorId: string;
+  type: string;
+  targetType?: string;
+  targetId?: string;
+  summary: string;
+  metadata?: Record<string, unknown>;
+  actorName?: string;
+  targetName?: string;
+  amount?: number;
+  beforeBalance?: number;
+  afterBalance?: number;
+  note?: string;
+  displayTitle?: string;
+  displayDetail?: string;
+}) {
+  return {
+    groupId,
+    operatorId,
+    type,
+    targetType: targetType || null,
+    targetId: targetId || null,
+    summary,
+    metadata,
+    actorName: actorName || null,
+    targetName: targetName || null,
+    amount: typeof amount === "number" ? amount : null,
+    beforeBalance: typeof beforeBalance === "number" ? beforeBalance : null,
+    afterBalance: typeof afterBalance === "number" ? afterBalance : null,
+    note: note || null,
+    displayTitle: displayTitle || null,
+    displayDetail: displayDetail || null,
+    createdAt: FieldValue.serverTimestamp()
+  };
+}
+
 async function writeAuditLog({
   groupId,
   operatorId,
@@ -217,24 +279,11 @@ async function writeAuditLog({
   displayTitle?: string;
   displayDetail?: string;
 }) {
-  await adminDb.collection("AuditLogs").doc().set({
-    groupId,
-    operatorId,
-    type,
-    targetType: targetType || null,
-    targetId: targetId || null,
-    summary,
-    metadata,
-    actorName: actorName || null,
-    targetName: targetName || null,
-    amount: typeof amount === "number" ? amount : null,
-    beforeBalance: typeof beforeBalance === "number" ? beforeBalance : null,
-    afterBalance: typeof afterBalance === "number" ? afterBalance : null,
-    note: note || null,
-    displayTitle: displayTitle || null,
-    displayDetail: displayDetail || null,
-    createdAt: FieldValue.serverTimestamp()
-  });
+  await adminDb.collection("AuditLogs").doc().set(buildAuditLogData({
+    groupId, operatorId, type, targetType, targetId, summary, metadata,
+    actorName, targetName, amount, beforeBalance, afterBalance, note,
+    displayTitle, displayDetail
+  }));
 }
 
 export async function POST(request: Request) {
@@ -867,6 +916,8 @@ export async function POST(request: Request) {
     }
     else if (action === "quickAddRecord") {
       const { memberId, groupId } = data || {};
+      const operationId = getOperationId(body.operationId);
+      if (!operationId) return NextResponse.json({ error: "Invalid operation ID" }, { status: 400 });
       const memberRef = adminDb.collection("Members").doc(memberId);
       const memberSnap = await memberRef.get();
       if (!memberSnap.exists) return NextResponse.json({ error: "Member not found" }, { status: 404 });
@@ -874,11 +925,23 @@ export async function POST(request: Request) {
       if (member?.groupId !== groupId) return NextResponse.json({ error: "Invalid member group" }, { status: 400 });
       if (!(await canManageGroup(groupId, user.uid))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       const memberName = getMemberDisplayName(member);
+      const operationFingerprint = JSON.stringify({ action, groupId, memberId });
       let beforeBalance = 0;
       let afterBalance = 0;
+      let replayed = false;
 
       const recordRef = adminDb.collection("Records").doc();
+      const operationRef = adminDb.collection("OperationReceipts").doc(`${user.uid}_${operationId}`);
+      const auditRef = adminDb.collection("AuditLogs").doc(`${user.uid}_${operationId}`);
       await adminDb.runTransaction(async (transaction) => {
+        const operationSnap = await transaction.get(operationRef);
+        if (operationSnap.exists) {
+          if (operationSnap.data()?.fingerprint !== operationFingerprint) {
+            throw new Error("操作标识已被其他请求使用");
+          }
+          replayed = true;
+          return;
+        }
         const freshMember = await transaction.get(memberRef);
         if (!freshMember.exists) throw new Error("成员不存在");
         beforeBalance = Number(freshMember.data()?.balance || 0);
@@ -899,27 +962,39 @@ export async function POST(request: Request) {
           note: "",
           createdAt: FieldValue.serverTimestamp()
         });
+        transaction.set(auditRef, buildAuditLogData({
+          groupId,
+          operatorId: user.uid,
+          type: "BALANCE_ADD",
+          targetType: "member",
+          targetId: memberId,
+          summary: "快速增加 1",
+          metadata: { amount: 1, operationId },
+          actorName,
+          targetName: memberName,
+          amount: 1,
+          beforeBalance,
+          afterBalance,
+          displayTitle: `${actorName}给${memberName}快速记了一笔 +1`,
+          displayDetail: `余额从 ${beforeBalance} 调整为 ${afterBalance}`
+        }));
+        transaction.set(operationRef, {
+          operationId,
+          action,
+          fingerprint: operationFingerprint,
+          operatorId: user.uid,
+          groupId,
+          memberId,
+          createdAt: FieldValue.serverTimestamp(),
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        });
       });
-      await writeAuditLog({
-        groupId,
-        operatorId: user.uid,
-        type: "BALANCE_ADD",
-        targetType: "member",
-        targetId: memberId,
-        summary: "快速增加 1",
-        metadata: { amount: 1 },
-        actorName,
-        targetName: memberName,
-        amount: 1,
-        beforeBalance,
-        afterBalance,
-        displayTitle: `${actorName}给${memberName}快速记了一笔 +1`,
-        displayDetail: `余额从 ${beforeBalance} 调整为 ${afterBalance}`
-      });
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ success: true, replayed });
     }
     else if (action === "submitRecord") {
       const { memberId, groupId, recordActionType, amount, note, balanceMode } = data || {};
+      const operationId = getOperationId(body.operationId);
+      if (!operationId) return NextResponse.json({ error: "Invalid operation ID" }, { status: 400 });
       if (!['ADD', 'DEDUCT', 'SET'].includes(recordActionType)
         || !Number.isFinite(amount) || !Number.isInteger(amount)
         || amount < 0 || (recordActionType !== "SET" && amount === 0)
@@ -942,14 +1017,34 @@ export async function POST(request: Request) {
 
       const memberName = getMemberDisplayName(member);
       const cleanedNote = typeof note === "string" ? note.trim().slice(0, 200) : "";
+      const operationFingerprint = JSON.stringify({
+        action, groupId, memberId, recordActionType, amount,
+        balanceMode: balanceMode === "CREDIT" ? "CREDIT" : "DEBT",
+        note: cleanedNote
+      });
       let beforeBalance = 0;
       let afterBalance = 0;
       let effectiveDebtDeducted = 0;
+      let replayed = false;
+
+      const operationRef = adminDb.collection("OperationReceipts").doc(`${user.uid}_${operationId}`);
+      const recordRef = adminDb.collection("Records").doc();
+      const auditRef = adminDb.collection("AuditLogs").doc(`${user.uid}_${operationId}`);
 
       await adminDb.runTransaction(async (transaction) => {
         const groupRef = adminDb.collection("Groups").doc(groupId);
-        const groupDoc = await transaction.get(groupRef);
-        const memberDoc = await transaction.get(memberRef);
+        const [operationSnap, groupDoc, memberDoc] = await Promise.all([
+          transaction.get(operationRef),
+          transaction.get(groupRef),
+          transaction.get(memberRef)
+        ]);
+        if (operationSnap.exists) {
+          if (operationSnap.data()?.fingerprint !== operationFingerprint) {
+            throw new Error("操作标识已被其他请求使用");
+          }
+          replayed = true;
+          return;
+        }
         if (!groupDoc.exists) throw new Error("群组不存在");
         if (!memberDoc.exists) throw new Error("成员不存在");
 
@@ -982,7 +1077,7 @@ export async function POST(request: Request) {
           totalAdded: newTotalAdded,
           updatedAt: FieldValue.serverTimestamp()
         });
-        transaction.set(adminDb.collection("Records").doc(), {
+        transaction.set(recordRef, {
           groupId,
           memberId,
           operatorId: user.uid,
@@ -995,39 +1090,50 @@ export async function POST(request: Request) {
           note: cleanedNote,
           createdAt: FieldValue.serverTimestamp()
         });
-      });
-      const actionTitle = recordActionType === "ADD"
-        ? `${actorName}给${memberName}记了一笔 +${amount}`
-        : recordActionType === "DEDUCT"
-          ? `${actorName}为${memberName}核销了 ${amount}`
-          : afterBalance < 0
-            ? `${actorName}将${memberName}调为抵扣额度 ${-afterBalance}`
-            : `${actorName}将${memberName}欠款调为 ${afterBalance}`;
-      await writeAuditLog({
-        groupId,
-        operatorId: user.uid,
-        type: recordActionType === "ADD" ? "BALANCE_ADD" : recordActionType === "DEDUCT" ? "BALANCE_DEDUCT" : "BALANCE_SET",
-        targetType: "member",
-        targetId: memberId,
-        summary: `调整成员余额：${recordActionType}`,
-        metadata: {
+        const actionTitle = recordActionType === "ADD"
+          ? `${actorName}给${memberName}记了一笔 +${amount}`
+          : recordActionType === "DEDUCT"
+            ? `${actorName}为${memberName}核销了 ${amount}`
+            : afterBalance < 0
+              ? `${actorName}将${memberName}调为抵扣额度 ${-afterBalance}`
+              : `${actorName}将${memberName}欠款调为 ${afterBalance}`;
+        transaction.set(auditRef, buildAuditLogData({
+          groupId,
+          operatorId: user.uid,
+          type: recordActionType === "ADD" ? "BALANCE_ADD" : recordActionType === "DEDUCT" ? "BALANCE_DEDUCT" : "BALANCE_SET",
+          targetType: "member",
+          targetId: memberId,
+          summary: `调整成员余额：${recordActionType}`,
+          metadata: {
+            amount,
+            effectiveDebtDeducted,
+            balanceMode: balanceMode === "CREDIT" ? "CREDIT" : "DEBT",
+            note: cleanedNote,
+            operationId
+          },
+          actorName,
+          targetName: memberName,
           amount,
-          effectiveDebtDeducted,
-          balanceMode: balanceMode === "CREDIT" ? "CREDIT" : "DEBT",
-          note: cleanedNote
-        },
-        actorName,
-        targetName: memberName,
-        amount,
-        beforeBalance,
-        afterBalance,
-        note: cleanedNote,
-        displayTitle: actionTitle,
-        displayDetail: afterBalance < 0
-          ? `调整后欠款为 0，抵扣额度为 ${-afterBalance}`
-          : `调整后欠款为 ${afterBalance}，抵扣额度为 0`
+          beforeBalance,
+          afterBalance,
+          note: cleanedNote,
+          displayTitle: actionTitle,
+          displayDetail: afterBalance < 0
+            ? `调整后欠款为 0，抵扣额度为 ${-afterBalance}`
+            : `调整后欠款为 ${afterBalance}，抵扣额度为 0`
+        }));
+        transaction.set(operationRef, {
+          operationId,
+          action,
+          fingerprint: operationFingerprint,
+          operatorId: user.uid,
+          groupId,
+          memberId,
+          createdAt: FieldValue.serverTimestamp(),
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        });
       });
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ success: true, replayed });
     }
     else if (action === "requestClaim") {
       const { groupId, memberId } = data || {};

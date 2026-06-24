@@ -3,14 +3,14 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { getDocProxy, proxyRequest, queryPageProxy, queryProxy, updateDocProxy } from "@/lib/useFirestore";
+import { createOperationId, getDocProxy, proxyRequest, queryPageProxy, queryProxy, updateDocProxy } from "@/lib/useFirestore";
 import { InfiniteScrollTrigger } from "@/components/infinite-scroll-trigger";
 import { startVisibleRefresh } from "@/lib/visible-refresh";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Modal } from "@/components/ui/modal";
 import Link from "next/link";
 import { motion, AnimatePresence, useSpring, useTransform } from "framer-motion";
-import { ArrowDownRight, ArrowUpRight, Download, RotateCcw, Share2, Trophy } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Download, LoaderCircle, RotateCcw, Share2, Trophy } from "lucide-react";
 import { Suspense } from "react";
 import { formatBalanceState, getBalanceView } from "@/lib/balance-display";
 import { getErrorMessage } from "@/lib/error-message";
@@ -155,10 +155,13 @@ function GroupDetailsContent() {
   
   const [floaters, setFloaters] = useState<{id: number, memberId: string}[]>([]);
   const floaterIdRef = useRef(0);
+  const quickAddLocksRef = useRef(new Set<string>());
+  const [pendingQuickAddMemberIds, setPendingQuickAddMemberIds] = useState<Set<string>>(new Set());
 
   const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
   const [newMemberName, setNewMemberName] = useState("");
   const [isActionLoading, setIsActionLoading] = useState(false);
+  const actionLockRef = useRef(false);
 
   const captureRef = useRef<HTMLDivElement>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -424,14 +427,18 @@ function GroupDetailsContent() {
 
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isAdmin || !newMemberName.trim()) return;
+    if (!isAdmin || !newMemberName.trim() || actionLockRef.current) return;
+    actionLockRef.current = true;
     setIsActionLoading(true);
     try {
       await proxyRequest({ action: "addMember", data: { groupId, remarkName: newMemberName.trim() } });
       setRefreshToken((value) => value + 1);
       setIsAddMemberModalOpen(false);
       setNewMemberName("");
-    } catch { alert("添加成员失败"); } finally { setIsActionLoading(false); }
+    } catch { alert("添加成员失败"); } finally {
+      actionLockRef.current = false;
+      setIsActionLoading(false);
+    }
   };
 
   const handleSortChange = async (nextSort: SortOption) => {
@@ -534,32 +541,48 @@ function GroupDetailsContent() {
 
   const handleQuickAdd = async (memberId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!user) return;
-    
-    const floatId = ++floaterIdRef.current;
-    setFloaters(prev => [...prev, { id: floatId, memberId }]);
-    setTimeout(() => {
-      setFloaters(prev => prev.filter(f => f.id !== floatId));
-    }, 1000);
+    if (!user || quickAddLocksRef.current.has(memberId)) return;
+
+    quickAddLocksRef.current.add(memberId);
+    setPendingQuickAddMemberIds(prev => new Set(prev).add(memberId));
 
     try {
-      await proxyRequest({ action: "quickAddRecord", data: { groupId, memberId } });
+      await proxyRequest({
+        action: "quickAddRecord",
+        operationId: createOperationId(),
+        data: { groupId, memberId }
+      });
+      const floatId = ++floaterIdRef.current;
+      setFloaters(prev => [...prev, { id: floatId, memberId }]);
+      setTimeout(() => {
+        setFloaters(prev => prev.filter(f => f.id !== floatId));
+      }, 1000);
       setRefreshToken((value) => value + 1);
       void loadWeeklyRankings();
     } catch { alert("操作失败"); }
+    finally {
+      quickAddLocksRef.current.delete(memberId);
+      setPendingQuickAddMemberIds(prev => {
+        const next = new Set(prev);
+        next.delete(memberId);
+        return next;
+      });
+    }
   };
 
   const handleRecordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedMember || !user) return;
+    if (!selectedMember || !user || actionLockRef.current) return;
     const amount = parseInt(recordAmount, 10);
     if (isNaN(amount) || amount < 0) { alert("请输入有效的非负整数"); return; }
 
+    actionLockRef.current = true;
     setIsActionLoading(true);
     
     try {
       await proxyRequest({
         action: "submitRecord",
+        operationId: createOperationId(),
         data: {
           groupId,
           memberId: selectedMember.id,
@@ -577,12 +600,16 @@ function GroupDetailsContent() {
         void loadWeeklyRankings();
       }
     } catch (err: unknown) { alert(getErrorMessage(err, "操作失败")); }
-    finally { setIsActionLoading(false); }
+    finally {
+      actionLockRef.current = false;
+      setIsActionLoading(false);
+    }
   };
 
   const handleEditRemarkName = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isAdmin || !selectedMember || !editRemarkName.trim()) return;
+    if (!isAdmin || !selectedMember || !editRemarkName.trim() || actionLockRef.current) return;
+    actionLockRef.current = true;
     setIsActionLoading(true);
     try {
       const nextName = editRemarkName.trim();
@@ -591,7 +618,10 @@ function GroupDetailsContent() {
       setEditRemarkName(nextName);
       alert("成员昵称已保存");
     } catch (err: unknown) { alert(getErrorMessage(err, "修改失败")); }
-    finally { setIsActionLoading(false); }
+    finally {
+      actionLockRef.current = false;
+      setIsActionLoading(false);
+    }
   };
 
   const handleUnbind = async () => {
@@ -846,7 +876,18 @@ function GroupDetailsContent() {
                     
                     <div className="w-12 sm:w-16 flex justify-end shrink-0 relative">
                       {isAdmin && (
-                        <button onClick={(e) => handleQuickAdd(member.id, e)} className="relative z-10 w-10 h-8 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl bg-primary text-white font-black text-base sm:text-lg hover:bg-primary/90 hover:-translate-y-1 hover:shadow-lg hover:shadow-primary/30 transition-all active:scale-95 flex items-center justify-center">+1</button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleQuickAdd(member.id, e)}
+                          disabled={pendingQuickAddMemberIds.has(member.id)}
+                          aria-label={pendingQuickAddMemberIds.has(member.id) ? `正在为${member.remarkName}增加 1` : `为${member.remarkName}增加 1`}
+                          aria-busy={pendingQuickAddMemberIds.has(member.id)}
+                          className="relative z-10 flex h-8 w-10 items-center justify-center rounded-lg bg-primary text-base font-black text-white transition-all hover:-translate-y-1 hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/30 active:scale-95 disabled:cursor-wait disabled:opacity-70 disabled:hover:translate-y-0 sm:h-12 sm:w-12 sm:rounded-xl sm:text-lg"
+                        >
+                          {pendingQuickAddMemberIds.has(member.id)
+                            ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none sm:h-5 sm:w-5" aria-hidden="true" />
+                            : "+1"}
+                        </button>
                       )}
                       {isUnclaimed && !hasClaimed && (
                         pendingClaimMemberIds.has(member.id) ? (
@@ -875,7 +916,7 @@ function GroupDetailsContent() {
           </div>
           <div className="pt-4 flex gap-3">
             <button type="button" onClick={() => setIsAddMemberModalOpen(false)} disabled={isActionLoading} className="flex-1 py-3 px-4 rounded-xl text-sm font-semibold text-gray-700 bg-gray-100 dark:bg-gray-800 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">取消</button>
-            <button type="submit" disabled={isActionLoading || !newMemberName.trim()} className="flex-1 py-3 px-4 rounded-xl text-sm font-semibold text-white bg-gray-900 dark:bg-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors">确认添加</button>
+            <button type="submit" disabled={isActionLoading || !newMemberName.trim()} aria-busy={isActionLoading} className="flex-1 py-3 px-4 rounded-xl text-sm font-semibold text-white bg-gray-900 dark:bg-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors disabled:cursor-wait disabled:opacity-60">{isActionLoading ? "添加中..." : "确认添加"}</button>
           </div>
         </form>
       </Modal>
@@ -910,7 +951,7 @@ function GroupDetailsContent() {
                   <input type="number" required min={0} value={recordAmount} onChange={(e) => setRecordAmount(e.target.value)} placeholder="输入数量" className="w-full min-w-0 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-2 focus:ring-primary text-base" />
                 </div>
                 <textarea value={recordNote} onChange={(e) => setRecordNote(e.target.value)} maxLength={200} rows={2} placeholder="备注（可选）" className="w-full min-w-0 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-2 focus:ring-primary text-base resize-none" />
-                <button type="submit" disabled={isActionLoading || !recordAmount} className="w-full min-h-11 px-6 rounded-xl font-bold text-white bg-primary disabled:opacity-50">提交</button>
+                <button type="submit" disabled={isActionLoading || !recordAmount} aria-busy={isActionLoading} className="w-full min-h-11 px-6 rounded-xl font-bold text-white bg-primary disabled:cursor-wait disabled:opacity-60">{isActionLoading ? "处理中..." : "提交"}</button>
               </form>
             )}
 
@@ -959,7 +1000,7 @@ function GroupDetailsContent() {
                       <input type="text" value={editRemarkName} onChange={e => setEditRemarkName(e.target.value)} className="w-full min-w-0 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 outline-none focus:ring-1 focus:ring-primary text-base sm:text-sm" placeholder="修改备注名" />
                       <p className="text-[11px] text-gray-400 mt-1 ml-1">修改该成员的昵称</p>
                     </div>
-                    <button type="submit" disabled={isActionLoading || !editRemarkName} className="w-full sm:w-auto min-h-10 px-4 text-sm font-bold bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded-lg whitespace-nowrap">保存</button>
+                    <button type="submit" disabled={isActionLoading || !editRemarkName} aria-busy={isActionLoading} className="w-full sm:w-auto min-h-10 px-4 text-sm font-bold bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded-lg whitespace-nowrap disabled:cursor-wait disabled:opacity-60">{isActionLoading ? "保存中..." : "保存"}</button>
                   </form>
                 </div>
               </div>
