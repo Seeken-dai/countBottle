@@ -58,7 +58,9 @@ export function Modal({ isOpen, onClose, title, children, maxWidth = "md" }: Mod
                     {title}
                   </Dialog.Title>
                   <button
+                    type="button"
                     onClick={onClose}
+                    aria-label="关闭弹窗"
                     className="rounded-full p-1 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors focus:outline-none"
                   >
                     <X className="w-5 h-5" />

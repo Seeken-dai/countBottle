@@ -192,7 +192,8 @@ function GroupDetailsContent() {
   const [weeklyRankings, setWeeklyRankings] = useState<WeeklyRankings | null>(null);
   const [weeklyRankingLoading, setWeeklyRankingLoading] = useState(false);
   const [weeklyRankingError, setWeeklyRankingError] = useState<string | null>(null);
-  const [activeRankingType, setActiveRankingType] = useState<RankingType | null>(null);
+  const [rankingModalType, setRankingModalType] = useState<RankingType>("add");
+  const [isRankingModalOpen, setIsRankingModalOpen] = useState(false);
   const weeklyRankingLoadedGroupRef = useRef<string | null>(null);
   const weeklyRankingRequestRef = useRef(0);
 
@@ -738,7 +739,10 @@ function GroupDetailsContent() {
                 {weeklyRankings.add[0] && (
                   <button
                     type="button"
-                    onClick={() => setActiveRankingType("add")}
+                    onClick={() => {
+                      setRankingModalType("add");
+                      setIsRankingModalOpen(true);
+                    }}
                     className="group flex min-w-0 items-center justify-between rounded-xl border border-gray-200 bg-gray-50 p-4 text-left transition-all hover:border-emerald-300 hover:bg-emerald-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:border-white/10 dark:bg-white/5 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/20"
                     aria-label={`查看近 7 天记入排行榜，第一名 ${weeklyRankings.add[0].name}`}
                   >
@@ -758,7 +762,10 @@ function GroupDetailsContent() {
                 {weeklyRankings.deduct[0] && (
                   <button
                     type="button"
-                    onClick={() => setActiveRankingType("deduct")}
+                    onClick={() => {
+                      setRankingModalType("deduct");
+                      setIsRankingModalOpen(true);
+                    }}
                     className="group flex min-w-0 items-center justify-between rounded-xl border border-gray-200 bg-gray-50 p-4 text-left transition-all hover:border-orange-300 hover:bg-orange-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 dark:border-white/10 dark:bg-white/5 dark:hover:border-orange-700 dark:hover:bg-orange-950/20"
                     aria-label={`查看近 7 天结算排行榜，第一名 ${weeklyRankings.deduct[0].name}`}
                   >
@@ -1032,17 +1039,17 @@ function GroupDetailsContent() {
         )}
       </Modal>
       <Modal
-        isOpen={activeRankingType !== null}
-        onClose={() => setActiveRankingType(null)}
-        title={activeRankingType === "deduct" ? "近 7 天结算排行榜" : "近 7 天记入排行榜"}
+        isOpen={isRankingModalOpen}
+        onClose={() => setIsRankingModalOpen(false)}
+        title={rankingModalType === "deduct" ? "近 7 天结算排行榜" : "近 7 天记入排行榜"}
         maxWidth="lg"
       >
-        {activeRankingType && weeklyRankings && (
+        {weeklyRankings && (
           <div>
             <p className="text-sm text-gray-500 dark:text-gray-400">
               含今天在内的 7 个自然日。仅统计记入与实际减少待结的结算数量；调整数量及转为可抵扣的部分不计入排行。
             </p>
-            <RankingPodium entries={weeklyRankings[activeRankingType]} unit={group.unit} />
+            <RankingPodium entries={weeklyRankings[rankingModalType]} unit={group.unit} />
           </div>
         )}
       </Modal>
